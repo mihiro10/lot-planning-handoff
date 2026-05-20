@@ -181,7 +181,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
     st.download_button(
         '📥 今月ファイルをダウンロード',
         data=result['jun_bytes'],
-        file_name=jun_file.name,
+        file_name=f'merged_file_{datetime.now().strftime("%Y-%m-%d")}.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         type='primary',
     )
