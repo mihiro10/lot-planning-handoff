@@ -166,9 +166,13 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
         st.stop()
 
     # Summary bar
+    def fmt_date(d):  # "2026-05-31" -> "5/31"
+        parts = d.split('-')
+        return f"{int(parts[1])}/{int(parts[2])}"
+
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric('先月末', result['may_last_date'])
-    c2.metric('今月開始', result['jun_start'])
+    c1.metric('先月末', fmt_date(result['may_last_date']))
+    c2.metric('今月開始', fmt_date(result['jun_start']))
     c3.metric('転記済み', len(result['transferred']))
     c4.metric('新規', len(result['new_products']))
     c5.metric('廃止', len(result['discontinued']))
