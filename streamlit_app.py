@@ -9,7 +9,7 @@ COL_NAME   = 11
 COL_H      = 8
 COL_RTYPE  = 20
 COL_DAY1   = 21
-TRANSFER_TYPES = ['備考', '計画（倍）', '入庫', '使用予測']
+TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
 
 
 def parse_date(val):
