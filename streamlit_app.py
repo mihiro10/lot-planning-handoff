@@ -1,6 +1,7 @@
 import streamlit as st
 from io import BytesIO
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 import traceback
 import openpyxl
 
@@ -9,7 +10,8 @@ COL_NAME   = 11
 COL_H      = 8
 COL_RTYPE  = 20
 COL_DAY1   = 21
-TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
+TRANSFER_TYPES  = ['備考', '計画（倍）', '使用予測']
+FUZZY_THRESHOLD = 0.82
 
 
 def parse_date(val):
@@ -19,17 +21,27 @@ def parse_date(val):
 
 
 def build_product_map(ws):
+    """品目名をキーに {行種別: 行番号} のマップを作成。備考行から順にスキャンして同じブロックの全行を収集する。"""
     products = {}
+    current_name = None
     for row in range(3, ws.max_row + 1):
         rtype = ws.cell(row, COL_RTYPE).value
-        code  = ws.cell(row, COL_CODE).value
-        if code and rtype:
-            if code not in products:
-                products[code] = {'rows': {}, 'name': None}
-            products[code]['rows'][rtype] = row
-            if rtype == '備考':
-                products[code]['name'] = ws.cell(row, COL_NAME).value
+        if not rtype:
+            continue
+        if rtype == '備考':
+            name = ws.cell(row, COL_NAME).value
+            if name:
+                current_name = name
+                products[name] = {'rows': {}, 'code': ws.cell(row, COL_CODE).value}
+            else:
+                current_name = None
+        if current_name:
+            products[current_name]['rows'][rtype] = row
     return products
+
+
+def _similarity(a, b):
+    return SequenceMatcher(None, a, b).ratio()
 
 
 def run_handoff(may_bytes, jun_bytes):
@@ -49,10 +61,10 @@ def run_handoff(may_bytes, jun_bytes):
         jun_start = parse_date(jun_ws.cell(2, COL_DAY1).value)
 
         if not may_start:
-            result['error'] = '先月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = '先月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if not jun_start:
-            result['error'] = '今月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = '今月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if jun_start <= may_start:
             result['error'] = f'今月の開始日（{jun_start}）が先月の開始日（{may_start}）より前です。ファイルの順番を確認してください。'
@@ -74,41 +86,41 @@ def run_handoff(may_bytes, jun_bytes):
         jun_products = build_product_map(jun_ws)
 
         if not may_products:
-            result['error'] = '先月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '先月ファイルに品目名（K列）が入力された商品が見つかりません。'
             return result
         if not jun_products:
-            result['error'] = '今月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '今月ファイルに品目名（K列）が入力された商品が見つかりません。'
             return result
 
-        for code, info in may_products.items():
-            if code not in jun_products:
-                result['discontinued'].append({'code': code, 'name': info['name'] or '（名前なし）'})
+        for name, info in may_products.items():
+            if name not in jun_products:
+                result['discontinued'].append({'name': name, 'code': info['code']})
 
-        for code, jun_info in jun_products.items():
-            name = jun_info['name'] or '（名前なし）'
-            if code not in may_products:
-                result['new_products'].append({'code': code, 'name': name})
+        for name, jun_info in jun_products.items():
+            code = jun_info['code']
+            if name not in may_products:
+                result['new_products'].append({'name': name, 'code': code})
                 continue
 
-            may_rows = may_products[code]['rows']
+            may_rows = may_products[name]['rows']
             jun_rows = jun_info['rows']
             item = {
-                'code': code, 'name': name,
+                'name': name, 'code': code,
                 'takadoshi_mae': None, 'takadoshi_warning': False,
                 'transferred_types': [], 'skipped_types': [],
             }
 
             if '最終' not in may_rows:
-                result['warnings'].append(f'[{code}] {name}: 先月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
+                result['warnings'].append(f'{name}: 先月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
             elif '備考' not in jun_rows:
-                result['warnings'].append(f'[{code}] {name}: 今月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
+                result['warnings'].append(f'{name}: 今月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
             else:
                 val = may_ws.cell(may_rows['最終'], may_last_col).value
                 jun_ws.cell(jun_rows['備考'], COL_H).value = val
                 item['takadoshi_mae'] = val
                 if val is None:
                     item['takadoshi_warning'] = True
-                    result['warnings'].append(f'[{code}] {name}: 先月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+                    result['warnings'].append(f'{name}: 先月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
 
             for rtype in TRANSFER_TYPES:
                 if rtype not in may_rows:
@@ -125,9 +137,20 @@ def run_handoff(may_bytes, jun_bytes):
                         any_val = True
                 item['transferred_types'].append(rtype)
                 if not any_val:
-                    result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが先月のオーバーフロー欄がすべて空白でした。')
+                    result['warnings'].append(f'{name} / {rtype}: 転記しましたが先月のオーバーフロー欄がすべて空白でした。')
 
             result['transferred'].append(item)
+
+        # Fuzzy match warning: discontinued name similar to new name → possible rename
+        for disc in result['discontinued']:
+            for new in result['new_products']:
+                ratio = _similarity(disc['name'], new['name'])
+                if ratio >= FUZZY_THRESHOLD:
+                    result['warnings'].append(
+                        f'名前が似ている商品があります（類似度{ratio:.0%}）: '
+                        f'廃止「{disc["name"]}」/ 新規「{new["name"]}」 — '
+                        f'名前変更の場合は手動で転記してください。'
+                    )
 
         out = BytesIO()
         jun_wb.save(out)
@@ -146,7 +169,7 @@ def run_handoff(may_bytes, jun_bytes):
 
 st.set_page_config(page_title='月次引き継ぎ', page_icon='📋', layout='centered')
 st.title('月次引き継ぎ')
-st.caption('先月のオーバーフロー計画（備考・計画・入庫・使用予測）と先月末在庫を今月ファイルに転記します。')
+st.caption('先月のオーバーフロー計画（備考・計画・使用予測）と先月末在庫を今月ファイルに転記します。')
 
 col1, col2 = st.columns(2)
 with col1:
@@ -166,7 +189,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
         st.stop()
 
     # Summary bar
-    def fmt_date(d):  # "2026-05-31" -> "5/31"
+    def fmt_date(d):
         parts = d.split('-')
         return f"{int(parts[1])}/{int(parts[2])}"
 
@@ -181,7 +204,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
     st.download_button(
         '📥 今月ファイルをダウンロード',
         data=result['jun_bytes'],
-        file_name=f'merged_file_{datetime.now().strftime("%Y-%m-%d")}.xlsx',
+        file_name=f'merged_{datetime.now().strftime("%Y-%m-%d")}.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         type='primary',
     )
@@ -203,7 +226,8 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
             )
             transferred = '　'.join(item['transferred_types']) or 'なし'
             skipped     = '　'.join(item['skipped_types'])     or 'なし'
-            with st.expander(f"✅ [{item['code']}] {item['name']}"):
+            label = f"✅ {item['name']}" + (f"  [{item['code']}]" if item['code'] else '')
+            with st.expander(label):
                 st.write(f"**棚卸し前在庫:** {takadoshi}")
                 st.write(f"**転記行:** {transferred}")
                 if item['skipped_types']:
@@ -213,10 +237,12 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
     if result['new_products']:
         st.subheader('新規商品（在庫数を手動入力してください）')
         for p in result['new_products']:
-            st.warning(f"[{p['code']}] {p['name']}", icon='🆕')
+            label = p['name'] + (f"  [{p['code']}]" if p['code'] else '')
+            st.warning(label, icon='🆕')
 
     # Discontinued
     if result['discontinued']:
         st.subheader('廃止商品（今月ファイルに存在しないためスキップ）')
         for p in result['discontinued']:
-            st.info(f"[{p['code']}] {p['name']}", icon='🗂️')
+            label = p['name'] + (f"  [{p['code']}]" if p['code'] else '')
+            st.info(label, icon='🗂️')
