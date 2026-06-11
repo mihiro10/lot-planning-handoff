@@ -156,13 +156,13 @@ def run_handoff(may_bytes, jun_bytes):
 
 st.set_page_config(page_title='月次引き継ぎ', page_icon='📋', layout='centered')
 st.title('月次引き継ぎ')
-st.caption('先月のオーバーフロー計画（備考・計画・入庫・使用予測）と先月末在庫を今月ファイルに転記します。')
+st.caption('今月のオーバーフロー計画（備考・計画・入庫・使用予測）と今月末在庫を来月ファイルに転記します。')
 
 col1, col2 = st.columns(2)
 with col1:
-    may_file = st.file_uploader('先月ファイル（例: 5月計画.xlsx）', type='xlsx', key='may')
+    may_file = st.file_uploader('今月のファイル（記入済み）（例: 6月計画.xlsx）', type='xlsx', key='may')
 with col2:
-    jun_file = st.file_uploader('今月ファイル（例: 6月計画.xlsx）', type='xlsx', key='jun')
+    jun_file = st.file_uploader('来月のファイル（空白）（例: 7月計画.xlsx）', type='xlsx', key='jun')
 
 if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and jun_file)):
     with st.spinner('処理中...'):
@@ -177,15 +177,15 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
 
     # Summary bar
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric('先月末', result['may_last_date'])
-    c2.metric('今月開始', result['jun_start'])
+    c1.metric('今月末', result['may_last_date'])
+    c2.metric('来月開始', result['jun_start'])
     c3.metric('転記済み', len(result['transferred']))
     c4.metric('新規', len(result['new_products']))
     c5.metric('廃止', len(result['discontinued']))
 
     # Download
     st.download_button(
-        '📥 今月ファイルをダウンロード',
+        '📥 来月のファイルをダウンロード（記入済み）',
         data=result['jun_bytes'],
         file_name=jun_file.name,
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -223,6 +223,6 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
 
     # Discontinued
     if result['discontinued']:
-        st.subheader('廃止商品（今月ファイルに存在しないためスキップ）')
+        st.subheader('廃止商品（来月ファイルに存在しないためスキップ）')
         for p in result['discontinued']:
             st.info(f"[{p['code']}] {p['name']}", icon='🗂️')
