@@ -45,7 +45,7 @@ def build_product_map(ws):
     return products
 
 
-def run_handoff(may_bytes, jun_bytes):
+def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
     result = {
         'success': False, 'error': None, 'detail': None,
         'may_start': None, 'jun_start': None, 'may_last_date': None,
@@ -55,8 +55,8 @@ def run_handoff(may_bytes, jun_bytes):
     try:
         may_wb = openpyxl.load_workbook(BytesIO(may_bytes), data_only=True)
         jun_wb = openpyxl.load_workbook(BytesIO(jun_bytes))
-        may_ws = find_planning_sheet(may_wb)
-        jun_ws = find_planning_sheet(jun_wb)
+        may_ws = may_wb[may_sheet] if may_sheet else find_planning_sheet(may_wb)
+        jun_ws = jun_wb[jun_sheet] if jun_sheet else find_planning_sheet(jun_wb)
 
         may_start = parse_date(may_ws.cell(2, COL_DAY1).value)
         jun_start = parse_date(jun_ws.cell(2, COL_DAY1).value)
@@ -178,9 +178,31 @@ with col1:
 with col2:
     jun_file = st.file_uploader('来月のファイル（空白）（例: 7月計画.xlsx）', type='xlsx', key='jun')
 
+may_sheet = None
+jun_sheet = None
+
+if may_file and jun_file:
+    may_bytes = may_file.read()
+    jun_bytes = jun_file.read()
+
+    may_wb_peek = openpyxl.load_workbook(BytesIO(may_bytes), read_only=True, data_only=True)
+    jun_wb_peek = openpyxl.load_workbook(BytesIO(jun_bytes), read_only=True, data_only=True)
+
+    may_sheets = may_wb_peek.sheetnames
+    jun_sheets = jun_wb_peek.sheetnames
+
+    may_default = find_planning_sheet(openpyxl.load_workbook(BytesIO(may_bytes), data_only=True)).title
+    jun_default = find_planning_sheet(openpyxl.load_workbook(BytesIO(jun_bytes), data_only=True)).title
+
+    col3, col4 = st.columns(2)
+    with col3:
+        may_sheet = st.selectbox('今月：使用するシート', may_sheets, index=may_sheets.index(may_default))
+    with col4:
+        jun_sheet = st.selectbox('来月：使用するシート', jun_sheets, index=jun_sheets.index(jun_default))
+
 if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and jun_file)):
     with st.spinner('処理中...'):
-        result = run_handoff(may_file.read(), jun_file.read())
+        result = run_handoff(may_bytes, jun_bytes, may_sheet, jun_sheet)
 
     if result['error']:
         st.error(result['error'])
