@@ -1,13 +1,13 @@
 import streamlit as st
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import traceback
 import openpyxl
 
 COL_CODE   = 5
-COL_NAME   = 10
+COL_NAME   = 11  # 品目名
 COL_H      = 7   # 棚卸し前在庫
-COL_RTYPE  = 19  # 行種別
+COL_RTYPE  = 20  # 行種別
 COL_DAY1   = 21
 TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
 
@@ -16,6 +16,14 @@ def parse_date(val):
     if isinstance(val, datetime):
         return val.date()
     return None
+
+
+def find_planning_sheet(wb):
+    """Return the first sheet that has a date in row 2, col COL_DAY1 (U2)."""
+    for ws in wb.worksheets:
+        if isinstance(ws.cell(2, COL_DAY1).value, datetime):
+            return ws
+    return wb.active
 
 
 def build_product_map(ws):
@@ -47,20 +55,20 @@ def run_handoff(may_bytes, jun_bytes):
     try:
         may_wb = openpyxl.load_workbook(BytesIO(may_bytes), data_only=True)
         jun_wb = openpyxl.load_workbook(BytesIO(jun_bytes))
-        may_ws = may_wb.active
-        jun_ws = jun_wb.active
+        may_ws = find_planning_sheet(may_wb)
+        jun_ws = find_planning_sheet(jun_wb)
 
         may_start = parse_date(may_ws.cell(2, COL_DAY1).value)
         jun_start = parse_date(jun_ws.cell(2, COL_DAY1).value)
 
         if not may_start:
-            result['error'] = '先月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = f'今月ファイルのシート「{may_ws.title}」のU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if not jun_start:
-            result['error'] = '今月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = f'来月ファイルのシート「{jun_ws.title}」のU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if jun_start <= may_start:
-            result['error'] = f'今月の開始日（{jun_start}）が先月の開始日（{may_start}）より前です。ファイルの順番を確認してください。'
+            result['error'] = f'来月の開始日（{jun_start}）が今月の開始日（{may_start}）より前です。ファイルの順番を確認してください。'
             return result
 
         result['may_start']     = str(may_start)
@@ -68,11 +76,13 @@ def run_handoff(may_bytes, jun_bytes):
         may_last_date           = jun_start - timedelta(days=1)
         result['may_last_date'] = str(may_last_date)
 
+        is_last_day = date.today() == may_last_date
+
         may_last_col      = COL_DAY1 + (may_last_date - may_start).days
         overlap_start_col = COL_DAY1 + (jun_start     - may_start).days
 
         if overlap_start_col > may_ws.max_column:
-            result['error'] = f'先月ファイルにオーバーフロー列（{jun_start}以降）が見つかりません。先月ファイルに翌月分の列が含まれているか確認してください。'
+            result['error'] = f'今月ファイルにオーバーフロー列（{jun_start}以降）が見つかりません。今月ファイルに翌月分の列が含まれているか確認してください。'
             return result
 
         overlap_days = min(
@@ -84,10 +94,10 @@ def run_handoff(may_bytes, jun_bytes):
         jun_products = build_product_map(jun_ws)
 
         if not may_products:
-            result['error'] = '先月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '今月ファイルにコード（E列）が入力された商品が見つかりません。'
             return result
         if not jun_products:
-            result['error'] = '今月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '来月ファイルにコード（E列）が入力された商品が見つかりません。'
             return result
 
         for code, info in may_products.items():
@@ -108,24 +118,25 @@ def run_handoff(may_bytes, jun_bytes):
                 'transferred_types': [], 'skipped_types': [],
             }
 
-            if '最終' not in may_rows:
-                result['warnings'].append(f'[{code}] {name}: 先月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
-            elif '備考' not in jun_rows:
-                result['warnings'].append(f'[{code}] {name}: 今月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
-            else:
-                val = may_ws.cell(may_rows['最終'], may_last_col).value
-                jun_ws.cell(jun_rows['備考'], COL_H).value = val
-                item['takadoshi_mae'] = val
-                if val is None:
-                    item['takadoshi_warning'] = True
-                    result['warnings'].append(f'[{code}] {name}: 先月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+            if is_last_day:
+                if '最終' not in may_rows:
+                    result['warnings'].append(f'[{code}] {name}: 今月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
+                elif '備考' not in jun_rows:
+                    result['warnings'].append(f'[{code}] {name}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
+                else:
+                    val = may_ws.cell(may_rows['最終'], may_last_col).value
+                    jun_ws.cell(jun_rows['備考'], COL_H).value = val
+                    item['takadoshi_mae'] = val
+                    if val is None:
+                        item['takadoshi_warning'] = True
+                        result['warnings'].append(f'[{code}] {name}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
 
             for rtype in TRANSFER_TYPES:
                 if rtype not in may_rows:
-                    item['skipped_types'].append(f'{rtype}（先月に行なし）')
+                    item['skipped_types'].append(f'{rtype}（今月に行なし）')
                     continue
                 if rtype not in jun_rows:
-                    item['skipped_types'].append(f'{rtype}（今月に行なし）')
+                    item['skipped_types'].append(f'{rtype}（来月に行なし）')
                     continue
                 any_val = False
                 for i in range(overlap_days):
@@ -135,9 +146,12 @@ def run_handoff(may_bytes, jun_bytes):
                         any_val = True
                 item['transferred_types'].append(rtype)
                 if not any_val:
-                    result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが先月のオーバーフロー欄がすべて空白でした。')
+                    result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
 
             result['transferred'].append(item)
+
+        # Remove sheet protection so the output file is editable in Excel
+        jun_ws.protection.sheet = False
 
         out = BytesIO()
         jun_wb.save(out)
@@ -183,11 +197,12 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
     c4.metric('新規', len(result['new_products']))
     c5.metric('廃止', len(result['discontinued']))
 
-    # Download
+    # Download — filename: <original_stem>移行済.xlsx
+    stem = jun_file.name.rsplit('.', 1)[0]
     st.download_button(
         '📥 来月のファイルをダウンロード（記入済み）',
         data=result['jun_bytes'],
-        file_name=jun_file.name,
+        file_name=f'{stem}移行済.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         type='primary',
     )
@@ -197,32 +212,3 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
         with st.expander(f'⚠️ 確認が必要な項目 ({len(result["warnings"])}件)', expanded=True):
             for w in result['warnings']:
                 st.warning(w, icon='⚠️')
-
-    # Transferred
-    if result['transferred']:
-        st.subheader('転記済み商品')
-        for item in result['transferred']:
-            takadoshi = (
-                f"{item['takadoshi_mae']} ⚠️" if item['takadoshi_warning']
-                else str(item['takadoshi_mae']) if item['takadoshi_mae'] is not None
-                else '空白'
-            )
-            transferred = '　'.join(item['transferred_types']) or 'なし'
-            skipped     = '　'.join(item['skipped_types'])     or 'なし'
-            with st.expander(f"✅ [{item['code']}] {item['name']}"):
-                st.write(f"**棚卸し前在庫:** {takadoshi}")
-                st.write(f"**転記行:** {transferred}")
-                if item['skipped_types']:
-                    st.write(f"**スキップ:** {skipped}")
-
-    # New products
-    if result['new_products']:
-        st.subheader('新規商品（在庫数を手動入力してください）')
-        for p in result['new_products']:
-            st.warning(f"[{p['code']}] {p['name']}", icon='🆕')
-
-    # Discontinued
-    if result['discontinued']:
-        st.subheader('廃止商品（来月ファイルに存在しないためスキップ）')
-        for p in result['discontinued']:
-            st.info(f"[{p['code']}] {p['name']}", icon='🗂️')
