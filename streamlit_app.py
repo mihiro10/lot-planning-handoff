@@ -3,6 +3,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, date
 import traceback
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 
 COL_CODE   = 5
 COL_NAME   = 11  # 品目名
@@ -16,6 +17,12 @@ def parse_date(val):
     if isinstance(val, datetime):
         return val.date()
     return None
+
+
+def safe_write(ws, row, col, val):
+    cell = ws.cell(row, col)
+    if not isinstance(cell, MergedCell):
+        cell.value = val
 
 
 def find_planning_sheet(wb):
@@ -134,7 +141,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
                     else:
                         val = may_ws.cell(may_block['最終'], may_last_col).value
-                        jun_ws.cell(jun_block['備考'], COL_H).value = val
+                        safe_write(jun_ws, jun_block['備考'], COL_H, val)
                         if b_idx == 0:
                             item['takadoshi_mae'] = val
                         if val is None:
@@ -153,7 +160,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                     any_val = False
                     for i in range(overlap_days):
                         val = may_ws.cell(may_block[rtype], overlap_start_col + i).value
-                        jun_ws.cell(jun_block[rtype], COL_DAY1 + i).value = val
+                        safe_write(jun_ws, jun_block[rtype], COL_DAY1 + i, val)
                         if val is not None:
                             any_val = True
                     if b_idx == 0:
