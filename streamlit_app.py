@@ -135,6 +135,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                 'takadoshi_mae': None, 'takadoshi_warning': False,
                 'transferred_types': [], 'skipped_types': [],
             }
+            nyuko_written_dates = []
 
             for b_idx in range(min(len(may_blocks), len(jun_blocks))):
                 may_block = may_blocks[b_idx]
@@ -185,6 +186,17 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         keikaku = may_ws.cell(may_block['計画（倍）'], may_col).value
                         if keikaku:
                             safe_write(jun_ws, jun_block['入庫予定数'], COL_DAY1 + d, keikaku * lot_size)
+                            if b_idx == 0:
+                                nyuko_written_dates.append(jun_start + timedelta(days=d))
+
+            if nyuko_written_dates:
+                first = nyuko_written_dates[0]
+                last  = nyuko_written_dates[-1]
+                if first == last:
+                    label = f'入庫予定数（{first.month}/{first.day}）'
+                else:
+                    label = f'入庫予定数（{first.month}/{first.day}〜{last.month}/{last.day}）'
+                item['transferred_types'].append(label)
 
             result['transferred'].append(item)
 
