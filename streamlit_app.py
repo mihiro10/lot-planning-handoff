@@ -11,8 +11,9 @@ COL_H      = 7   # 棚卸し前在庫
 COL_L      = 12  # ロット（一回あたり）
 COL_R      = 18  # 入庫リードタイム（日）
 COL_RTYPE  = 20  # 行種別
-COL_DAY1   = 21
-TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
+COL_DAY1        = 21
+MAX_LEAD_TIME   = 6   # cap for 入庫予定数 blind-spot fill
+TRANSFER_TYPES  = ['備考', '計画（倍）', '使用予測']
 
 
 def parse_date(val):
@@ -174,7 +175,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
 
                 # Fill 入庫予定数 for the first lead_time days of 来月 (formula blind spot)
-                lead_time = may_block.get('_lead_time', 0)
+                lead_time = min(may_block.get('_lead_time', 0), MAX_LEAD_TIME)
                 lot_size  = may_block.get('_lot_size',  0)
                 if lead_time and lot_size and '入庫予定数' in jun_block and '計画（倍）' in may_block:
                     for d in range(lead_time):
