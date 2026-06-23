@@ -8,6 +8,8 @@ from openpyxl.cell.cell import MergedCell
 COL_CODE   = 5
 COL_NAME   = 11  # 品目名
 COL_H      = 7   # 棚卸し前在庫
+COL_L      = 12  # ロット（一回あたり）
+COL_R      = 18  # 入庫リードタイム（日）
 COL_RTYPE  = 20  # 行種別
 COL_DAY1   = 21
 TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
@@ -52,8 +54,11 @@ def build_product_map(ws):
         if rtype == '備考' and p['blocks'][-1]:
             p['blocks'].append({})
         p['blocks'][-1][rtype] = row
-        if rtype == '備考' and code:
-            p['name'] = ws.cell(row, COL_NAME).value
+        if rtype == '備考':
+            p['blocks'][-1]['_lot_size']  = ws.cell(row, COL_L).value or 0
+            p['blocks'][-1]['_lead_time'] = int(ws.cell(row, COL_R).value or 0)
+            if code:
+                p['name'] = ws.cell(row, COL_NAME).value
     return products
 
 
@@ -167,6 +172,18 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         item['transferred_types'].append(rtype)
                     if not any_val and b_idx == 0:
                         result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
+
+                # Fill 入庫予定数 for the first lead_time days of 来月 (formula blind spot)
+                lead_time = may_block.get('_lead_time', 0)
+                lot_size  = may_block.get('_lot_size',  0)
+                if lead_time and lot_size and '入庫予定数' in jun_block and '計画（倍）' in may_block:
+                    for d in range(lead_time):
+                        may_col = overlap_start_col - lead_time + d
+                        if may_col < COL_DAY1:
+                            continue
+                        keikaku = may_ws.cell(may_block['計画（倍）'], may_col).value
+                        if keikaku:
+                            safe_write(jun_ws, jun_block['入庫予定数'], COL_DAY1 + d, keikaku * lot_size)
 
             result['transferred'].append(item)
 
