@@ -8,7 +8,7 @@ COL_CODE   = 5
 COL_NAME   = 10
 COL_H      = 7   # 棚卸し前在庫
 COL_RTYPE  = 19  # 行種別
-COL_DAY1   = 20
+COL_DAY1   = 21
 TRANSFER_TYPES = ['備考', '計画（倍）', '使用予測']
 
 
@@ -54,10 +54,10 @@ def run_handoff(may_bytes, jun_bytes):
         jun_start = parse_date(jun_ws.cell(2, COL_DAY1).value)
 
         if not may_start:
-            result['error'] = '先月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = '先月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if not jun_start:
-            result['error'] = '今月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = '今月ファイルのU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if jun_start <= may_start:
             result['error'] = f'今月の開始日（{jun_start}）が先月の開始日（{may_start}）より前です。ファイルの順番を確認してください。'
