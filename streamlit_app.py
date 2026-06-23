@@ -36,12 +36,17 @@ def build_product_map(ws):
             continue
         if code:
             current_code = code
-        if current_code:
-            if current_code not in products:
-                products[current_code] = {'rows': {}, 'name': None}
-            products[current_code]['rows'][rtype] = row
-            if rtype == '備考' and code:
-                products[current_code]['name'] = ws.cell(row, COL_NAME).value
+        if not current_code:
+            continue
+        if current_code not in products:
+            products[current_code] = {'name': None, 'blocks': [{}]}
+        p = products[current_code]
+        # Each 備考 row starts a new block (except the very first)
+        if rtype == '備考' and p['blocks'][-1]:
+            p['blocks'].append({})
+        p['blocks'][-1][rtype] = row
+        if rtype == '備考' and code:
+            p['name'] = ws.cell(row, COL_NAME).value
     return products
 
 
@@ -102,7 +107,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
 
         for code, info in may_products.items():
             if code not in jun_products:
-                result['discontinued'].append({'code': code, 'name': info['name'] or '（名前なし）'})
+                result['discontinued'].append({'code': code, 'name': info.get('name') or '（名前なし）'})
 
         for code, jun_info in jun_products.items():
             name = jun_info['name'] or '（名前なし）'
@@ -110,43 +115,51 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                 result['new_products'].append({'code': code, 'name': name})
                 continue
 
-            may_rows = may_products[code]['rows']
-            jun_rows = jun_info['rows']
+            may_blocks = may_products[code]['blocks']
+            jun_blocks = jun_info['blocks']
             item = {
                 'code': code, 'name': name,
                 'takadoshi_mae': None, 'takadoshi_warning': False,
                 'transferred_types': [], 'skipped_types': [],
             }
 
-            if is_last_day:
-                if '最終' not in may_rows:
-                    result['warnings'].append(f'[{code}] {name}: 今月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
-                elif '備考' not in jun_rows:
-                    result['warnings'].append(f'[{code}] {name}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
-                else:
-                    val = may_ws.cell(may_rows['最終'], may_last_col).value
-                    jun_ws.cell(jun_rows['備考'], COL_H).value = val
-                    item['takadoshi_mae'] = val
-                    if val is None:
-                        item['takadoshi_warning'] = True
-                        result['warnings'].append(f'[{code}] {name}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+            for b_idx in range(min(len(may_blocks), len(jun_blocks))):
+                may_block = may_blocks[b_idx]
+                jun_block = jun_blocks[b_idx]
 
-            for rtype in TRANSFER_TYPES:
-                if rtype not in may_rows:
-                    item['skipped_types'].append(f'{rtype}（今月に行なし）')
-                    continue
-                if rtype not in jun_rows:
-                    item['skipped_types'].append(f'{rtype}（来月に行なし）')
-                    continue
-                any_val = False
-                for i in range(overlap_days):
-                    val = may_ws.cell(may_rows[rtype], overlap_start_col + i).value
-                    jun_ws.cell(jun_rows[rtype], COL_DAY1 + i).value = val
-                    if val is not None:
-                        any_val = True
-                item['transferred_types'].append(rtype)
-                if not any_val:
-                    result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
+                if is_last_day:
+                    if '最終' not in may_block:
+                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
+                    elif '備考' not in jun_block:
+                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
+                    else:
+                        val = may_ws.cell(may_block['最終'], may_last_col).value
+                        jun_ws.cell(jun_block['備考'], COL_H).value = val
+                        if b_idx == 0:
+                            item['takadoshi_mae'] = val
+                        if val is None:
+                            item['takadoshi_warning'] = True
+                            result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+
+                for rtype in TRANSFER_TYPES:
+                    if rtype not in may_block:
+                        if b_idx == 0:
+                            item['skipped_types'].append(f'{rtype}（今月に行なし）')
+                        continue
+                    if rtype not in jun_block:
+                        if b_idx == 0:
+                            item['skipped_types'].append(f'{rtype}（来月に行なし）')
+                        continue
+                    any_val = False
+                    for i in range(overlap_days):
+                        val = may_ws.cell(may_block[rtype], overlap_start_col + i).value
+                        jun_ws.cell(jun_block[rtype], COL_DAY1 + i).value = val
+                        if val is not None:
+                            any_val = True
+                    if b_idx == 0:
+                        item['transferred_types'].append(rtype)
+                    if not any_val and b_idx == 0:
+                        result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
 
             result['transferred'].append(item)
 
