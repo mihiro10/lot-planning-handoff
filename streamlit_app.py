@@ -155,6 +155,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                             item['takadoshi_warning'] = True
                             result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
 
+                block_any_val = False
                 for rtype in TRANSFER_TYPES:
                     if rtype not in may_block:
                         if b_idx == 0:
@@ -170,10 +171,11 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         safe_write(jun_ws, jun_block[rtype], COL_DAY1 + i, val)
                         if val is not None:
                             any_val = True
-                    if b_idx == 0:
+                            block_any_val = True
+                    if b_idx == 0 and any_val:
                         item['transferred_types'].append(rtype)
-                    if not any_val and b_idx == 0:
-                        result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが今月のオーバーフロー欄がすべて空白でした。')
+                if b_idx == 0 and not block_any_val:
+                    result['warnings'].append(f'[{code}] {name}: 今月のオーバーフロー欄にデータがありませんでした。')
 
                 # Fill 入庫予定数 for the first lead_time days of 来月 (formula blind spot)
                 lead_time = min(may_block.get('_lead_time', 0), MAX_LEAD_TIME)
