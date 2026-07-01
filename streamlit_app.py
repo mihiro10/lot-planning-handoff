@@ -104,7 +104,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
             rows = []
             for item in result['transferred']:
                 rows.append({
-                    'コード': item['code'],
+                    'コード': str(item['code']),
                     '品目名': item['name'],
                     '転記した行': '、'.join(item['transferred_types']) if item['transferred_types'] else '（なし）',
                     'スキップした行': '、'.join(item['skipped_types']) if item['skipped_types'] else '―',
@@ -113,8 +113,14 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
 
     if result['new_products']:
         with st.expander(f'🆕 新規商品 ({len(result["new_products"])}件) — 在庫数を手動入力してください', expanded=False):
-            st.dataframe(result['new_products'], use_container_width=True, hide_index=True)
+            st.dataframe(
+                [{'コード': str(p['code']), '品目名': p['name']} for p in result['new_products']],
+                use_container_width=True, hide_index=True,
+            )
 
     if result['discontinued']:
         with st.expander(f'🗑️ 廃止商品 ({len(result["discontinued"])}件) — 来月ファイルに存在しないためスキップ', expanded=False):
-            st.dataframe(result['discontinued'], use_container_width=True, hide_index=True)
+            st.dataframe(
+                [{'コード': str(p['code']), '品目名': p['name']} for p in result['discontinued']],
+                use_container_width=True, hide_index=True,
+            )
