@@ -33,11 +33,15 @@ def safe_write(ws, row, col, val):
 
 
 def find_planning_sheet(wb):
-    """Return the first sheet that has a date in row 2, col COL_DAY1 (U2)."""
+    """Return the sheet with the latest date in U2; falls back to wb.active."""
+    best_ws   = None
+    best_date = None
     for ws in wb.worksheets:
-        if isinstance(ws.cell(2, COL_DAY1).value, datetime):
-            return ws
-    return wb.active
+        d = parse_date(ws.cell(2, COL_DAY1).value)
+        if d and (best_date is None or d > best_date):
+            best_ws   = ws
+            best_date = d
+    return best_ws or wb.active
 
 
 def build_product_map(ws):
@@ -106,7 +110,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
         may_last_date           = jun_start - timedelta(days=1)
         result['may_last_date'] = str(may_last_date)
 
-        is_last_day       = date.today() == may_last_date
+        is_last_day       = date.today() >= may_last_date
         may_last_col      = COL_DAY1 + (may_last_date - may_start).days
         overlap_start_col = COL_DAY1 + (jun_start - may_start).days
 
@@ -147,6 +151,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                 'transferred_types': [], 'skipped_types': [],
             }
             nyuko_written_dates = []
+            product_any_val = False
 
             for b_idx in range(min(len(may_blocks), len(jun_blocks))):
                 may_block = may_blocks[b_idx]
@@ -158,7 +163,9 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                     elif '備考' not in jun_block:
                         result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
                     else:
-                        val = may_ws.cell(may_block['最終'], may_last_col).value
+                        raw = may_ws.cell(may_block['最終'], may_last_col).value
+                        # skip formula errors (#VALUE!, #REF!, etc.)
+                        val = None if isinstance(raw, str) and raw.startswith('#') else raw
                         safe_write(jun_ws, jun_block['備考'], COL_H, val)
                         if b_idx == 0:
                             item['takadoshi_mae'] = val
@@ -166,7 +173,6 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                             item['takadoshi_warning'] = True
                             result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
 
-                block_any_val = False
                 for rtype in TRANSFER_TYPES:
                     if rtype not in may_block:
                         if b_idx == 0:
@@ -182,12 +188,9 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         safe_write(jun_ws, jun_block[rtype], COL_DAY1 + i, val)
                         if val is not None:
                             any_val = True
-                            block_any_val = True
-                    if b_idx == 0 and any_val:
+                            product_any_val = True
+                    if any_val and rtype not in item['transferred_types']:
                         item['transferred_types'].append(rtype)
-
-                if b_idx == 0 and not block_any_val:
-                    result['warnings'].append(f'[{code}] {name}: 今月のオーバーフロー欄にデータがありませんでした。')
 
                 lead_time = min(may_block.get('_lead_time', 0), MAX_LEAD_TIME)
                 lot_size  = may_block.get('_lot_size', 0)
@@ -201,6 +204,9 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                             safe_write(jun_ws, jun_block['入庫予定数'], COL_DAY1 + d, keikaku * lot_size)
                             if b_idx == 0:
                                 nyuko_written_dates.append(jun_start + timedelta(days=d))
+
+            if not product_any_val:
+                result['warnings'].append(f'[{code}] {name}: 今月のオーバーフロー欄にデータがありませんでした。')
 
             if nyuko_written_dates:
                 first = nyuko_written_dates[0]
