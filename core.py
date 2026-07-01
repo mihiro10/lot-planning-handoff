@@ -38,7 +38,7 @@ def find_planning_sheet(wb):
     best_date = None
     for ws in wb.worksheets:
         d = parse_date(ws.cell(2, COL_DAY1).value)
-        if d and (best_date is None or d > best_date):
+        if d and (best_date is None or d >= best_date):
             best_ws   = ws
             best_date = d
     return best_ws or wb.active
