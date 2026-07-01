@@ -8,6 +8,7 @@ from core import run_handoff, find_planning_sheet
 st.set_page_config(page_title='月次引き継ぎ', page_icon='📋', layout='centered')
 st.title('月次引き継ぎ')
 st.caption('今月のオーバーフロー計画（備考・計画・入庫・使用予測）と今月末在庫を来月ファイルに転記します。')
+st.caption('v2')
 
 with st.expander('このアプリの使い方', expanded=False):
     st.markdown("""
