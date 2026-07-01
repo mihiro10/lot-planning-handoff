@@ -112,7 +112,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
                 'コード': str(item['code']),
                 '品目名': item['name'],
                 '転記した行': transferred,
-                '棚卸し前在庫': str(takadoshi),
+                '前月最終在庫・次月棚卸し前在庫': str(takadoshi),
                 '備考': notes,
             })
         st.dataframe(rows, use_container_width=True, hide_index=True)
