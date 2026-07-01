@@ -44,6 +44,25 @@ def find_planning_sheet(wb):
     return best_ws or wb.active
 
 
+def find_duplicate_codes(ws):
+    """Return list of {code, names} where the same code maps to conflicting product names."""
+    code_names = {}
+    for row in range(3, ws.max_row + 1):
+        code  = ws.cell(row, COL_CODE).value
+        rtype = ws.cell(row, COL_RTYPE).value
+        if code and rtype == '備考':
+            name = ws.cell(row, COL_NAME).value or ''
+            if code not in code_names:
+                code_names[code] = []
+            if name not in code_names[code]:
+                code_names[code].append(name)
+    return [
+        {'code': str(code), 'names': '、'.join(names)}
+        for code, names in code_names.items()
+        if len(names) > 1
+    ]
+
+
 def build_product_map(ws):
     products = {}
     current_code = None
@@ -83,7 +102,8 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
     result = {
         'success': False, 'error': None, 'detail': None,
         'may_start': None, 'jun_start': None, 'may_last_date': None,
-        'transferred': [], 'new_products': [], 'discontinued': [], 'warnings': [],
+        'transferred': [], 'new_products': [], 'discontinued': [],
+        'may_duplicates': [], 'jun_duplicates': [],
         'jun_bytes': None,
     }
     try:
@@ -123,6 +143,9 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
             jun_ws.max_column - COL_DAY1 + 1,
         )
 
+        result['may_duplicates'] = find_duplicate_codes(may_ws)
+        result['jun_duplicates'] = find_duplicate_codes(jun_ws)
+
         may_products = build_product_map(may_ws)
         jun_products = build_product_map(jun_ws)
 
@@ -147,8 +170,8 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
             jun_blocks = jun_info['blocks']
             item = {
                 'code': code, 'name': name,
-                'takadoshi_mae': None, 'takadoshi_warning': False,
-                'transferred_types': [], 'skipped_types': [],
+                'takadoshi_mae': None,
+                'transferred_types': [], 'skipped_types': [], 'notes': [],
             }
             nyuko_written_dates = []
             product_any_val = False
@@ -159,9 +182,9 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
 
                 if is_last_day:
                     if '最終' not in may_block:
-                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
+                        item['notes'].append(f'ブロック{b_idx+1}: 今月に最終行が見つかりません')
                     elif '備考' not in jun_block:
-                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
+                        item['notes'].append(f'ブロック{b_idx+1}: 来月に備考行が見つかりません')
                     else:
                         raw = may_ws.cell(may_block['最終'], may_last_col).value
                         if isinstance(raw, str) and raw.startswith('#'):
@@ -171,8 +194,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                             if b_idx == 0:
                                 item['takadoshi_mae'] = raw
                             if raw is None:
-                                item['takadoshi_warning'] = True
-                                result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+                                item['notes'].append(f'ブロック{b_idx+1}: 今月末({may_last_date})の最終在庫が空白')
 
                 for rtype in TRANSFER_TYPES:
                     if rtype not in may_block:
@@ -207,7 +229,7 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                                 nyuko_written_dates.append(jun_start + timedelta(days=d))
 
             if not product_any_val:
-                result['warnings'].append(f'[{code}] {name}: 今月のオーバーフロー欄にデータがありませんでした。')
+                item['notes'].append('オーバーフロー欄にデータなし')
 
             if nyuko_written_dates:
                 first = nyuko_written_dates[0]

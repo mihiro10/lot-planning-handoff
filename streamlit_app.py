@@ -8,7 +8,6 @@ from core import run_handoff, find_planning_sheet
 st.set_page_config(page_title='月次引き継ぎ', page_icon='📋', layout='centered')
 st.title('月次引き継ぎ')
 st.caption('今月のオーバーフロー計画（備考・計画・入庫・使用予測）と今月末在庫を来月ファイルに転記します。')
-st.caption('v2')
 
 with st.expander('このアプリの使い方', expanded=False):
     st.markdown("""
@@ -82,7 +81,7 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
     c4.metric('新規', len(result['new_products']))
     c5.metric('廃止', len(result['discontinued']))
 
-    # Download — filename: <original_stem>移行済.xlsx
+    # Download
     stem = jun_file.name.rsplit('.', 1)[0]
     st.download_button(
         '📥 来月のファイルをダウンロード（記入済み）',
@@ -92,35 +91,42 @@ if st.button('引き継ぎを実行', type='primary', disabled=not (may_file and
         type='primary',
     )
 
-    # Warnings
-    if result['warnings']:
-        with st.expander(f'⚠️ 確認が必要な項目 ({len(result["warnings"])}件)', expanded=True):
-            for w in result['warnings']:
-                st.warning(w, icon='⚠️')
+    # Duplicate codes
+    for label, dupes in [('今月', result['may_duplicates']), ('来月', result['jun_duplicates'])]:
+        if dupes:
+            st.error(f'{label}ファイルに重複コードがあります。確認してください。')
+            st.dataframe(
+                [{'コード': d['code'], '該当品目名': d['names']} for d in dupes],
+                use_container_width=True, hide_index=True,
+            )
 
-    # Transferred products
+    # Unified results table
     if result['transferred']:
-        with st.expander(f'✅ 転記済み商品 ({len(result["transferred"])}件)', expanded=False):
-            rows = []
-            for item in result['transferred']:
-                rows.append({
-                    'コード': str(item['code']),
-                    '品目名': item['name'],
-                    '転記した行': '、'.join(item['transferred_types']) if item['transferred_types'] else '（なし）',
-                    'スキップした行': '、'.join(item['skipped_types']) if item['skipped_types'] else '―',
-                })
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.subheader('転記結果')
+        rows = []
+        for item in result['transferred']:
+            transferred = '、'.join(item['transferred_types']) if item['transferred_types'] else '（なし）'
+            takadoshi = item['takadoshi_mae'] if item['takadoshi_mae'] is not None else '―'
+            notes = '　'.join(item['notes']) if item['notes'] else ''
+            rows.append({
+                'コード': str(item['code']),
+                '品目名': item['name'],
+                '転記した行': transferred,
+                '棚卸し前在庫': str(takadoshi),
+                '備考': notes,
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
     if result['new_products']:
-        with st.expander(f'🆕 新規商品 ({len(result["new_products"])}件) — 在庫数を手動入力してください', expanded=False):
-            st.dataframe(
-                [{'コード': str(p['code']), '品目名': p['name']} for p in result['new_products']],
-                use_container_width=True, hide_index=True,
-            )
+        st.subheader(f'新規商品（{len(result["new_products"])}件） — 在庫数を手動入力してください')
+        st.dataframe(
+            [{'コード': str(p['code']), '品目名': p['name']} for p in result['new_products']],
+            use_container_width=True, hide_index=True,
+        )
 
     if result['discontinued']:
-        with st.expander(f'🗑️ 廃止商品 ({len(result["discontinued"])}件) — 来月ファイルに存在しないためスキップ', expanded=False):
-            st.dataframe(
-                [{'コード': str(p['code']), '品目名': p['name']} for p in result['discontinued']],
-                use_container_width=True, hide_index=True,
-            )
+        st.subheader(f'廃止商品（{len(result["discontinued"])}件） — 来月ファイルに存在しないためスキップ')
+        st.dataframe(
+            [{'コード': str(p['code']), '品目名': p['name']} for p in result['discontinued']],
+            use_container_width=True, hide_index=True,
+        )
