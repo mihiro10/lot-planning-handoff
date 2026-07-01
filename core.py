@@ -164,14 +164,15 @@ def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
                         result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
                     else:
                         raw = may_ws.cell(may_block['最終'], may_last_col).value
-                        # skip formula errors (#VALUE!, #REF!, etc.)
-                        val = None if isinstance(raw, str) and raw.startswith('#') else raw
-                        safe_write(jun_ws, jun_block['備考'], COL_H, val)
-                        if b_idx == 0:
-                            item['takadoshi_mae'] = val
-                        if val is None:
-                            item['takadoshi_warning'] = True
-                            result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+                        if isinstance(raw, str) and raw.startswith('#'):
+                            pass  # formula error in source — skip silently
+                        else:
+                            safe_write(jun_ws, jun_block['備考'], COL_H, raw)
+                            if b_idx == 0:
+                                item['takadoshi_mae'] = raw
+                            if raw is None:
+                                item['takadoshi_warning'] = True
+                                result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
 
                 for rtype in TRANSFER_TYPES:
                     if rtype not in may_block:
