@@ -1,17 +1,21 @@
 from flask import Flask, request, send_file, render_template_string
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import traceback
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 
 app = Flask(__name__)
 
-COL_CODE   = 6
-COL_NAME   = 11
-COL_H      = 8
-COL_RTYPE  = 19
-COL_DAY1   = 20
-TRANSFER_TYPES = ['備考', '計画（倍）', '入庫', '使用予測']
+COL_CODE        = 5
+COL_NAME        = 11  # 品目名
+COL_H           = 7   # 棚卸し前在庫
+COL_L           = 12  # ロット（一回あたり）
+COL_R           = 18  # 入庫リードタイム（日）
+COL_RTYPE       = 20  # 行種別
+COL_DAY1        = 21
+MAX_LEAD_TIME   = 6
+TRANSFER_TYPES  = ['備考', '計画（倍）', '使用予測']
 
 
 def parse_date(val):
@@ -20,21 +24,46 @@ def parse_date(val):
     return None
 
 
+def safe_write(ws, row, col, val):
+    cell = ws.cell(row, col)
+    if not isinstance(cell, MergedCell):
+        cell.value = val
+
+
+def find_planning_sheet(wb):
+    for ws in wb.worksheets:
+        if isinstance(ws.cell(2, COL_DAY1).value, datetime):
+            return ws
+    return wb.active
+
+
 def build_product_map(ws):
     products = {}
+    current_code = None
     for row in range(3, ws.max_row + 1):
         rtype = ws.cell(row, COL_RTYPE).value
         code  = ws.cell(row, COL_CODE).value
-        if code and rtype:
-            if code not in products:
-                products[code] = {'rows': {}, 'name': None}
-            products[code]['rows'][rtype] = row
-            if rtype == '備考':
-                products[code]['name'] = ws.cell(row, COL_NAME).value
+        if not rtype:
+            continue
+        if code:
+            current_code = code
+        if not current_code:
+            continue
+        if current_code not in products:
+            products[current_code] = {'name': None, 'blocks': [{}]}
+        p = products[current_code]
+        if rtype == '備考' and p['blocks'][-1]:
+            p['blocks'].append({})
+        p['blocks'][-1][rtype] = row
+        if rtype == '備考':
+            p['blocks'][-1]['_lot_size']  = ws.cell(row, COL_L).value or 0
+            p['blocks'][-1]['_lead_time'] = int(ws.cell(row, COL_R).value or 0)
+            if code:
+                p['name'] = ws.cell(row, COL_NAME).value
     return products
 
 
-def run_handoff(may_bytes, jun_bytes):
+def run_handoff(may_bytes, jun_bytes, may_sheet=None, jun_sheet=None):
     result = {
         'success': False, 'error': None, 'detail': None,
         'may_start': None, 'jun_start': None, 'may_last_date': None,
@@ -44,97 +73,135 @@ def run_handoff(may_bytes, jun_bytes):
     try:
         may_wb = openpyxl.load_workbook(BytesIO(may_bytes), data_only=True)
         jun_wb = openpyxl.load_workbook(BytesIO(jun_bytes))
-        may_ws = may_wb.active
-        jun_ws = jun_wb.active
+        may_ws = may_wb[may_sheet] if may_sheet else find_planning_sheet(may_wb)
+        jun_ws = jun_wb[jun_sheet] if jun_sheet else find_planning_sheet(jun_wb)
 
         may_start = parse_date(may_ws.cell(2, COL_DAY1).value)
         jun_start = parse_date(jun_ws.cell(2, COL_DAY1).value)
 
         if not may_start:
-            result['error'] = '先月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = f'今月ファイルのシート「{may_ws.title}」のU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if not jun_start:
-            result['error'] = '今月ファイルのT2セルに日付が見つかりません。日付形式を確認してください。'
+            result['error'] = f'来月ファイルのシート「{jun_ws.title}」のU2セルに日付が見つかりません。日付形式を確認してください。'
             return result
         if jun_start <= may_start:
-            result['error'] = f'今月の開始日({jun_start})が先月の開始日({may_start})より前になっています。ファイルの順番を確認してください。'
+            result['error'] = f'来月の開始日（{jun_start}）が今月の開始日（{may_start}）より前です。ファイルの順番を確認してください。'
             return result
 
-        result['may_start']    = str(may_start)
-        result['jun_start']    = str(jun_start)
-        may_last_date          = jun_start - timedelta(days=1)
-        result['may_last_date']= str(may_last_date)
+        result['may_start']     = str(may_start)
+        result['jun_start']     = str(jun_start)
+        may_last_date           = jun_start - timedelta(days=1)
+        result['may_last_date'] = str(may_last_date)
 
+        is_last_day       = date.today() == may_last_date
         may_last_col      = COL_DAY1 + (may_last_date - may_start).days
-        overlap_start_col = COL_DAY1 + (jun_start   - may_start).days
+        overlap_start_col = COL_DAY1 + (jun_start - may_start).days
 
-        # Check overflow columns exist in May file
         if overlap_start_col > may_ws.max_column:
-            result['error'] = f'先月ファイルにオーバーフロー列（{jun_start}以降）が見つかりません。先月ファイルに翌月分の列が含まれているか確認してください。'
+            result['error'] = f'今月ファイルにオーバーフロー列（{jun_start}以降）が見つかりません。今月ファイルに翌月分の列が含まれているか確認してください。'
             return result
+
+        overlap_days = min(
+            may_ws.max_column - overlap_start_col + 1,
+            jun_ws.max_column - COL_DAY1 + 1,
+        )
 
         may_products = build_product_map(may_ws)
         jun_products = build_product_map(jun_ws)
 
         if not may_products:
-            result['error'] = '先月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '今月ファイルにコード（E列）が入力された商品が見つかりません。'
             return result
         if not jun_products:
-            result['error'] = '今月ファイルにコード（F列）が入力された商品が見つかりません。'
+            result['error'] = '来月ファイルにコード（E列）が入力された商品が見つかりません。'
             return result
 
-        # Discontinued: in May but not in June
         for code, info in may_products.items():
             if code not in jun_products:
-                result['discontinued'].append({'code': code, 'name': info['name'] or '（名前なし）'})
+                result['discontinued'].append({'code': code, 'name': info.get('name') or '（名前なし）'})
 
         for code, jun_info in jun_products.items():
             name = jun_info['name'] or '（名前なし）'
-
             if code not in may_products:
                 result['new_products'].append({'code': code, 'name': name})
                 continue
 
-            may_rows = may_products[code]['rows']
-            jun_rows = jun_info['rows']
+            may_blocks = may_products[code]['blocks']
+            jun_blocks = jun_info['blocks']
             item = {
                 'code': code, 'name': name,
                 'takadoshi_mae': None, 'takadoshi_warning': False,
                 'transferred_types': [], 'skipped_types': [],
             }
+            nyuko_written_dates = []
 
-            # 棚卸し前在庫: May last day 最終 → June H on 備考 row
-            if '最終' not in may_rows:
-                result['warnings'].append(f'[{code}] {name}: 先月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
-            elif '備考' not in jun_rows:
-                result['warnings'].append(f'[{code}] {name}: 今月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
-            else:
-                val = may_ws.cell(may_rows['最終'], may_last_col).value
-                jun_ws.cell(jun_rows['備考'], COL_H).value = val
-                item['takadoshi_mae'] = val
-                if val is None:
-                    item['takadoshi_warning'] = True
-                    result['warnings'].append(f'[{code}] {name}: 先月末({may_last_date})の最終在庫が空白です。手動で確認してください。')
+            for b_idx in range(min(len(may_blocks), len(jun_blocks))):
+                may_block = may_blocks[b_idx]
+                jun_block = jun_blocks[b_idx]
 
-            # Transfer overlap rows
-            for rtype in TRANSFER_TYPES:
-                if rtype not in may_rows:
-                    item['skipped_types'].append(f'{rtype}（先月に行なし）')
-                    continue
-                if rtype not in jun_rows:
-                    item['skipped_types'].append(f'{rtype}（今月に行なし）')
-                    continue
-                any_val = False
-                for i in range(10):
-                    val = may_ws.cell(may_rows[rtype], overlap_start_col + i).value
-                    jun_ws.cell(jun_rows[rtype], COL_DAY1 + i).value = val
-                    if val is not None:
-                        any_val = True
-                item['transferred_types'].append(rtype)
-                if not any_val:
-                    result['warnings'].append(f'[{code}] {name} / {rtype}: 転記しましたが先月のオーバーフロー欄がすべて空白でした。')
+                if is_last_day:
+                    if '最終' not in may_block:
+                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月に最終行が見つかりません。棚卸し前在庫をスキップしました。')
+                    elif '備考' not in jun_block:
+                        result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 来月に備考行が見つかりません。棚卸し前在庫をスキップしました。')
+                    else:
+                        val = may_ws.cell(may_block['最終'], may_last_col).value
+                        safe_write(jun_ws, jun_block['備考'], COL_H, val)
+                        if b_idx == 0:
+                            item['takadoshi_mae'] = val
+                        if val is None:
+                            item['takadoshi_warning'] = True
+                            result['warnings'].append(f'[{code}] {name} ブロック{b_idx+1}: 今月末（{may_last_date}）の最終在庫が空白です。手動で確認してください。')
+
+                block_any_val = False
+                for rtype in TRANSFER_TYPES:
+                    if rtype not in may_block:
+                        if b_idx == 0:
+                            item['skipped_types'].append(f'{rtype}（今月に行なし）')
+                        continue
+                    if rtype not in jun_block:
+                        if b_idx == 0:
+                            item['skipped_types'].append(f'{rtype}（来月に行なし）')
+                        continue
+                    any_val = False
+                    for i in range(overlap_days):
+                        val = may_ws.cell(may_block[rtype], overlap_start_col + i).value
+                        safe_write(jun_ws, jun_block[rtype], COL_DAY1 + i, val)
+                        if val is not None:
+                            any_val = True
+                            block_any_val = True
+                    if b_idx == 0 and any_val:
+                        item['transferred_types'].append(rtype)
+
+                if b_idx == 0 and not block_any_val:
+                    result['warnings'].append(f'[{code}] {name}: 今月のオーバーフロー欄にデータがありませんでした。')
+
+                lead_time = min(may_block.get('_lead_time', 0), MAX_LEAD_TIME)
+                lot_size  = may_block.get('_lot_size', 0)
+                if lead_time and lot_size and '入庫予定数' in jun_block and '計画（倍）' in may_block:
+                    for d in range(lead_time):
+                        may_col = overlap_start_col - lead_time + d
+                        if may_col < COL_DAY1:
+                            continue
+                        keikaku = may_ws.cell(may_block['計画（倍）'], may_col).value
+                        if keikaku:
+                            safe_write(jun_ws, jun_block['入庫予定数'], COL_DAY1 + d, keikaku * lot_size)
+                            if b_idx == 0:
+                                nyuko_written_dates.append(jun_start + timedelta(days=d))
+
+            if nyuko_written_dates:
+                first = nyuko_written_dates[0]
+                last  = nyuko_written_dates[-1]
+                if first == last:
+                    label = f'入庫予定数（{first.month}/{first.day}）'
+                else:
+                    label = f'入庫予定数（{first.month}/{first.day}〜{last.month}/{last.day}）'
+                item['transferred_types'].append(label)
 
             result['transferred'].append(item)
+
+        jun_ws.protection.sheet = False
 
         out = BytesIO()
         jun_wb.save(out)
@@ -206,7 +273,7 @@ HTML = '''<!DOCTYPE html>
 <body>
 <div class="container">
   <h1>月次引き継ぎスクリプト</h1>
-  <p class="sub">今月のオーバーフロー計画（備考・計画・入庫・使用予測）と今月末在庫を来月ファイルに転記します。</p>
+  <p class="sub">今月のオーバーフロー計画（備考・計画（倍）・使用予測）と今月末在庫を来月ファイルに転記します。</p>
 
   <div class="card">
     <h2>ファイルを選択</h2>
@@ -257,7 +324,7 @@ HTML = '''<!DOCTYPE html>
     <div class="card" style="padding:0;overflow:hidden">
       <table>
         <thead><tr>
-          <th>コード</th><th>商品名</th><th>棚卸し前在庫</th><th>転記行</th><th>スキップ</th>
+          <th>コード</th><th>商品名</th><th>棚卸し前在庫</th><th>転記した行</th><th>スキップ</th>
         </tr></thead>
         <tbody>
         {% for item in result.transferred %}
@@ -290,7 +357,7 @@ HTML = '''<!DOCTYPE html>
     {% endif %}
 
     {% if result.new_products %}
-    <div class="section-title">新規商品（先月データなし・手動入力が必要）</div>
+    <div class="section-title">新規商品（今月データなし・手動入力が必要）</div>
     <div class="card" style="padding:0;overflow:hidden">
       <table>
         <thead><tr><th>コード</th><th>商品名</th><th>対応</th></tr></thead>
@@ -332,7 +399,7 @@ HTML = '''<!DOCTYPE html>
 
 
 _last_result_bytes = None
-_last_jun_filename = 'jun_output.xlsx'
+_last_jun_filename = 'jun_output移行済.xlsx'
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -350,7 +417,8 @@ def index():
             result = run_handoff(may_file.read(), jun_file.read())
             if result.get('jun_bytes'):
                 _last_result_bytes = result['jun_bytes']
-                _last_jun_filename = jun_file.filename or 'jun_output.xlsx'
+                stem = (jun_file.filename or 'jun_output').rsplit('.', 1)[0]
+                _last_jun_filename = f'{stem}移行済.xlsx'
 
     return render_template_string(HTML, result=result)
 
