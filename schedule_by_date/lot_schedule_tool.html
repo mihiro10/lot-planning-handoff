@@ -493,7 +493,7 @@ function render() {
       const f = e.target.files[0]; if (!f) return;
       try { emPrev = await loadEmPrev(f); render(); } catch (err) { $('emPrevMsg').textContent = err.message; }
     };
-    if ($('emPrevClear')) $('emPrevClear').onclick = () => { emPrev = null; render(); };
+    if ($('emPrevClear')) $('emPrevClear').onclick = () => { emPrev = null; emPrevOff = true; render(); };
     if ($('emPrintChg')) $('emPrintChg').onclick = () => { emPrint = 'chg'; renderEmPrint(); window.print(); emPrint = 'grid'; renderEmPrint(); };
     $('out').querySelectorAll('.seg button').forEach(b => b.onclick = () => { emLayout = b.dataset.l; render(); });
     $('emDate').onchange = e => { emDate = e.target.value; render(); };
@@ -624,15 +624,30 @@ async function loadEmPrev(file) {
   const book = XLSX.read(await file.arrayBuffer());
   const data = book.Sheets._data && XLSX.utils.sheet_to_json(book.Sheets._data, { header: 1, defval: '' });
   if (!data) throw new Error('このファイルには比較用のデータがありません（このツールで書き出したExcelを選んでください）。');
-  const sheet = book.Sheets['計画表'], prev = { byDate: new Map(), manual: new Map(), edited: [], name: file.name };
+  const sheet = book.Sheets['計画表'];
   const cellText = (r, c) => String(sheet?.[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })]?.v ?? '').replace(/\r\n?/g, '\n').trim();
+  return emPrevFromRows(data, cellText);
+}
+
+// Fallback when no file is chosen: the plan of the last export from this browser (no typed entries — those live only in the Excel)
+const EM_LAST_KEY = 'lotSchedule.emLastExport';
+let emPrevOff = false; // 比較をやめる: don't auto-load the remembered export again until the next export
+function emRememberExport(data) {
+  try { localStorage.setItem(EM_LAST_KEY, JSON.stringify(data.filter(r => r[0] !== 'gen'))); } catch {}
+}
+function emLastExport() {
+  try { const rows = JSON.parse(localStorage.getItem(EM_LAST_KEY)); return rows ? { ...emPrevFromRows(rows, null), auto: true } : null; } catch { return null; }
+}
+
+function emPrevFromRows(data, cellText) {
+  const prev = { byDate: new Map(), manual: new Map(), edited: [] };
   for (const r of data) {
     if (r[0] === 'meta') Object.assign(prev, { version: Number(r[1]) || 1, exportedAt: String(r[2]), from: String(r[3]), to: String(r[4]) });
     else if (r[0] === 'item') {
       const [, date, col, code, name, plan, planUnit] = r, key = `${date}|${code || name}`;
       if (!prev.byDate.has(date)) prev.byDate.set(date, []);
       prev.byDate.get(date).push({ key, col, name: String(name), plan: Number(plan), planUnit: String(planUnit) });
-    } else if (r[0] === 'gen') {
+    } else if (r[0] === 'gen' && cellText) {
       // What the tool wrote vs what the cell holds now: anything after the tool's text was typed in by hand
       const [, date, col, row, colNo, gen] = r, now = cellText(Number(row), Number(colNo)), g = String(gen).trim();
       if (now === g) continue;
@@ -681,6 +696,7 @@ function renderEm() {
   const first = parsed.dates[0].key, last = parsed.dates[parsed.dates.length - 1].key;
   if (!emDate) { const t = new Date(); t.setDate(t.getDate() + 1); emDate = ymd(t); }
   emDate = emDate < first ? first : emDate > last ? last : emDate;
+  if (!emPrev && !emPrevOff) emPrev = emLastExport();
   const days = emDays();
   if (!parsed.items.some(emSlotOf)) return `<div class="empty">${parsed.hasSlot ? '「肉処理 製造枠」が入った品目の計画がありません。' : 'このシートには 冷凍品・冷凍(箱)・販売用餃子/通販 の計画がありません（早朝の在庫表を入れてください）。'}</div>`;
   const ng = days.filter(d => d.ng);
@@ -694,8 +710,10 @@ function renderEm() {
     <label class="f">用紙<select id="emPaper">${Object.keys(EM_PAPER).map(p => `<option ${p === emPaper ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
     <button class="ghost" id="emXlsx">Excelに書き出し</button></div>
     <div class="row" style="margin-top:10px">
-    <label class="f">前回のExcel（変更チェック・手入力の引き継ぎ）<input type="file" id="emPrevFile" accept=".xlsx"></label>
-    ${emPrev ? `<span class="note"><b>第${emPrev.version}版</b>（${esc(emPrev.exportedAt)} 書き出し）と比較中 → 次の書き出しは<b>第${emPrev.version + 1}版</b></span><button class="ghost" id="emPrevClear">比較をやめる</button>` : '<span class="note">選ぶと、前回の版からの 追加・キャンセル・変更 に印が付き、Excelに書き込んだ内容も引き継がれます。</span>'}
+    <label class="f">今の計画表Excelを選ぶ（更新するとき）<input type="file" id="emPrevFile" accept=".xlsx"></label>
+    ${!emPrev ? '<span class="note">いま使っている計画表Excel（上書きしているファイルでOK）を選ぶと、その版からの 追加・キャンセル・変更 に印が付き、Excelに書き込んだキット・販促などもそのまま引き継がれます。</span>'
+      : emPrev.auto ? `<span class="note">ファイル未選択のため、<b>このパソコンで最後に書き出した第${emPrev.version}版</b>（${esc(emPrev.exportedAt)}）と比較中 → 次は<b>第${emPrev.version + 1}版</b>。<b>Excelに書き込んだ内容は引き継がれません</b>（引き継ぐには今の計画表Excelを選んでください）。</span><button class="ghost" id="emPrevClear">比較をやめる</button>`
+      : `<span class="note"><b>第${emPrev.version}版</b>（${esc(emPrev.exportedAt)} 書き出し）を更新中 → 次の書き出しは<b>第${emPrev.version + 1}版</b></span><button class="ghost" id="emPrevClear">比較をやめる</button>`}
     <span id="emPrevMsg" class="note" style="color:var(--zero)"></span></div>
     <p class="note" style="margin:10px 0 0">${parsed.hasSlot ? '枠は「肉処理 製造枠」列から（メイン冷凍・サブ冷凍・餃子・キット・米飯課・宅配・販促・その他。空欄/0は対象外）。' : '枠は分類から：冷凍品＝メイン、冷凍(箱)＝サブ、販売用餃子/通販＝餃子（品目名に「餃子」を含むものは分類に関係なく餃子）。'}期間は上の開始日・終了日（${md($('from').value)}〜${md($('to').value)}）。</p></div>`;
   if (emPrev) {
@@ -1110,6 +1128,8 @@ async function saveEmStyled(days, detail, filename) {
   }
   const hid = book.addWorksheet('_data', { state: 'veryHidden' });
   data.forEach(r => hid.addRow(r));
+  emRememberExport(data);
+  emPrevOff = false;
 
   const ds = book.addWorksheet('明細', { views: [{ state: 'frozen', ySplit: 1 }] });
   ds.columns = [7, 5, 12, 10, 34, 7, 8, 8, 6, 14].map(width => ({ width }));
