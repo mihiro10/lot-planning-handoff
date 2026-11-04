@@ -152,9 +152,13 @@ td.place .bad{color:var(--zero)}
 .chg{display:inline-block;background:#000;color:#fff;font-weight:bold;font-size:.85em;padding:0 3px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .evx td.hl{background:#fff3b0!important}
 .cx s{color:#555}
-.man:not(:first-child){border-top:1px dashed #888;margin-top:2px;padding-top:1px}
 .chgt{border-collapse:collapse;margin-top:8px;font-size:14px}
 .chgt th,.chgt td{border:1px solid var(--line,#ccc);padding:3px 8px;text-align:left}
+.rules{background:var(--card);border:1px solid var(--line,#ccc);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:14px}
+.rules summary{font-weight:bold;cursor:pointer}
+.rules table{border-collapse:collapse;margin:8px 0}
+.rules th,.rules td{border:1px solid var(--line,#ccc);padding:5px 8px;text-align:left;vertical-align:top}
+.rules ul{margin:4px 0 0;padding-left:20px}
 .chgl td{font-size:var(--fs,16px);vertical-align:middle;padding:6px 4px}
 .evx tr.ng td{background:#fbe3e3}
 .evwrap{background:#fff;color:#000;border:1px solid var(--line,#ccc);border-radius:8px;padding:8px;overflow-x:auto}
@@ -489,10 +493,6 @@ function render() {
   } else if (view === 'em') {
     $('em10').onclick = setTenDays;
     $('emPaper').onchange = e => { emPaper = e.target.value; renderEmPrint(); };
-    $('emPrevFile').onchange = async e => {
-      const f = e.target.files[0]; if (!f) return;
-      try { emPrev = await loadEmPrev(f); render(); } catch (err) { $('emPrevMsg').textContent = err.message; }
-    };
     if ($('emPrevClear')) $('emPrevClear').onclick = () => { emPrev = null; emPrevOff = true; render(); };
     if ($('emPrintChg')) $('emPrintChg').onclick = () => { emPrint = 'chg'; renderEmPrint(); window.print(); emPrint = 'grid'; renderEmPrint(); };
     $('out').querySelectorAll('.seg button').forEach(b => b.onclick = () => { emLayout = b.dataset.l; render(); });
@@ -561,10 +561,9 @@ function emDay(key) {
 }
 const emDays = () => parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value).map(d => emDay(d.key));
 const emQty = it => `${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <span class="tag">(${fmt(it.qty)}${esc(it.unit)})</span>` : ''}`;
-// ---- 前回のExcel: each export carries a hidden _data sheet; loading it back marks 追加 / キャンセル / 変更
-// against that version and carries over what was typed into the sheet. Same date + item = same plan;
-// a plan moved to another day is キャンセル on the old day and 追加 on the new one.
-let emPrev = null; // { version, exportedAt, from, to, byDate: Map(date → [{key, col, name, plan, planUnit}]), manual: Map('date|col' → text), edited: [] }
+// ---- Changes since the last export from this browser: 追加 / キャンセル / 変更 (rules in EM_RULES).
+// Same date + item = same plan; a plan moved to another day is キャンセル on the old day and 追加 on the new one.
+let emPrev = null; // { version, exportedAt, from, to, byDate: Map(date → [{key, col, name, plan, planUnit}]) }
 const emKey = (date, it) => `${date}|${it.code || it.name}`;
 const emPlanText = p => `${fmt(p.plan)}${p.planUnit}`;
 const emColOf = it => ({ 'メイン': 's1', 'サブ': 's2' })[emSlotOf(it)] || emSlotOf(it);
@@ -577,7 +576,7 @@ function emChangeOf(date, it) {
 }
 
 // Each cell as a list of lines, shared by the screen, the printout and the Excel export:
-// { it, tag, over, change } planned item · { it, zero } 0 that was already 0 · { cancel } キャンセル · { manual } carried-over typing
+// { it, tag, over, change } planned item · { it, zero } 0 that was already 0 · { cancel } キャンセル
 function emLines(day) {
   const cols = Object.fromEntries(EM_COLS.map(([k]) => [k, []]));
   const add = (k, it, extra) => cols[k].push({ it, change: emChangeOf(day.key, it), ...extra });
@@ -590,12 +589,10 @@ function emLines(day) {
   const gone = new Set(cancelled.map(p => p.key));
   day.zero.forEach(it => { if (!gone.has(emKey(day.key, it))) cols[emColOf(it)].push({ it, zero: true }); });
   cancelled.forEach(p => (cols[p.col] || cols.s1).push({ cancel: p }));
-  if (emPrev) EM_COLS.forEach(([k]) => { const t = emPrev.manual.get(`${day.key}|${k}`); if (t) cols[k].push({ manual: t }); });
   return cols;
 }
 const emChgTag = c => c.type === '変更' ? `<span class="chg">変更 ${esc(c.before)}→</span> ` : `<span class="chg">${c.type}</span> `;
 function emLineHtml(l) {
-  if (l.manual) return `<div class="man">${esc(l.manual).replace(/\n/g, '<br>')}</div>`;
   if (l.cancel) return `<div class="cx"><span class="chg">キャンセル</span> <s>${esc(l.cancel.name)} ${esc(emPlanText(l.cancel))}</s></div>`;
   if (l.zero) return `<div class="zz">${esc(l.it.name)} 0</div>`;
   const it = l.it, chg = l.change ? emChgTag(l.change) : '';
@@ -620,39 +617,35 @@ function emChanges(days) {
   return out;
 }
 
-async function loadEmPrev(file) {
-  const book = XLSX.read(await file.arrayBuffer());
-  const data = book.Sheets._data && XLSX.utils.sheet_to_json(book.Sheets._data, { header: 1, defval: '' });
-  if (!data) throw new Error('このファイルには比較用のデータがありません（このツールで書き出したExcelを選んでください）。');
-  const sheet = book.Sheets['計画表'];
-  const cellText = (r, c) => String(sheet?.[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })]?.v ?? '').replace(/\r\n?/g, '\n').trim();
-  return emPrevFromRows(data, cellText);
-}
+// How 追加 / キャンセル / 変更 are decided (the comparison follows the same rules) and how to mark them when editing the Excel by hand
+const EM_RULES = `<details class="rules" open><summary>変更・キャンセル・追加のルール</summary>
+  <p>前の版と<b>同じ日・同じ品目</b>どうしで比べます。</p>
+  <table><tr><th>区分</th><th>どういうとき</th><th>Excelでの書き方</th></tr>
+  <tr><td><span class="chg">変更</span></td><td>同じ日の同じ品目で、<b>数量（倍数）が変わった</b>とき<br><small>例：11/2 肉だんご 3倍 → 4倍</small></td><td>数字を直し、前に <b>【変更 3倍→】</b> と書く</td></tr>
+  <tr><td><span class="chg">キャンセル</span></td><td>その日の予定が<b>なくなった</b>とき（在庫表の計画は消さずに <b>0</b> にする）</td><td>消さずに<b>取り消し線</b>を引き、前に <b>【キャンセル】</b> と書く</td></tr>
+  <tr><td><span class="chg">追加</span></td><td>その日に<b>なかった品目が入った</b>とき</td><td>品目と数量を書き、前に <b>【追加】</b> と書く</td></tr></table>
+  <ul><li><b>日をずらすとき</b>は「変更」にしない：元の日＝<b>キャンセル</b>、新しい日＝<b>追加</b>。</li>
+  <li>枠（メイン／サブ）や備考だけが変わったときは、変更にしない。</li>
+  <li>書き直したセルは<b>黄色</b>に塗る。現場の計画表にも同じ書き方で書き込む。</li></ul></details>`;
 
-// Fallback when no file is chosen: the plan of the last export from this browser (no typed entries — those live only in the Excel)
+// The plan of the last export is remembered in this browser and compared against automatically
 const EM_LAST_KEY = 'lotSchedule.emLastExport';
 let emPrevOff = false; // 比較をやめる: don't auto-load the remembered export again until the next export
 function emRememberExport(data) {
-  try { localStorage.setItem(EM_LAST_KEY, JSON.stringify(data.filter(r => r[0] !== 'gen'))); } catch {}
+  try { localStorage.setItem(EM_LAST_KEY, JSON.stringify(data)); } catch {}
 }
 function emLastExport() {
-  try { const rows = JSON.parse(localStorage.getItem(EM_LAST_KEY)); return rows ? { ...emPrevFromRows(rows, null), auto: true } : null; } catch { return null; }
+  try { const rows = JSON.parse(localStorage.getItem(EM_LAST_KEY)); return rows ? emPrevFromRows(rows) : null; } catch { return null; }
 }
 
-function emPrevFromRows(data, cellText) {
-  const prev = { byDate: new Map(), manual: new Map(), edited: [] };
+function emPrevFromRows(data) {
+  const prev = { byDate: new Map() };
   for (const r of data) {
     if (r[0] === 'meta') Object.assign(prev, { version: Number(r[1]) || 1, exportedAt: String(r[2]), from: String(r[3]), to: String(r[4]) });
     else if (r[0] === 'item') {
       const [, date, col, code, name, plan, planUnit] = r, key = `${date}|${code || name}`;
       if (!prev.byDate.has(date)) prev.byDate.set(date, []);
       prev.byDate.get(date).push({ key, col, name: String(name), plan: Number(plan), planUnit: String(planUnit) });
-    } else if (r[0] === 'gen' && cellText) {
-      // What the tool wrote vs what the cell holds now: anything after the tool's text was typed in by hand
-      const [, date, col, row, colNo, gen] = r, now = cellText(Number(row), Number(colNo)), g = String(gen).trim();
-      if (now === g) continue;
-      if (now.startsWith(g)) prev.manual.set(`${date}|${col}`, now.slice(g.length).trim());
-      else prev.edited.push({ date: String(date), col: EM_COLS.find(c => c[0] === col)?.[1] || col, text: now });
     }
   }
   return prev;
@@ -709,17 +702,11 @@ function renderEm() {
     <button class="ghost" id="emPrintGrid">計画表を印刷</button>
     <label class="f">用紙<select id="emPaper">${Object.keys(EM_PAPER).map(p => `<option ${p === emPaper ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
     <button class="ghost" id="emXlsx">Excelに書き出し</button></div>
-    <div class="row" style="margin-top:10px">
-    <label class="f">今の計画表Excelを選ぶ（更新するとき）<input type="file" id="emPrevFile" accept=".xlsx"></label>
-    ${!emPrev ? '<span class="note">いま使っている計画表Excel（上書きしているファイルでOK）を選ぶと、その版からの 追加・キャンセル・変更 に印が付き、Excelに書き込んだキット・販促などもそのまま引き継がれます。</span>'
-      : emPrev.auto ? `<span class="note">ファイル未選択のため、<b>このパソコンで最後に書き出した第${emPrev.version}版</b>（${esc(emPrev.exportedAt)}）と比較中 → 次は<b>第${emPrev.version + 1}版</b>。<b>Excelに書き込んだ内容は引き継がれません</b>（引き継ぐには今の計画表Excelを選んでください）。</span><button class="ghost" id="emPrevClear">比較をやめる</button>`
-      : `<span class="note"><b>第${emPrev.version}版</b>（${esc(emPrev.exportedAt)} 書き出し）を更新中 → 次の書き出しは<b>第${emPrev.version + 1}版</b></span><button class="ghost" id="emPrevClear">比較をやめる</button>`}
-    <span id="emPrevMsg" class="note" style="color:var(--zero)"></span></div>
+    ${emPrev ? `<div class="row" style="margin-top:10px"><span class="note">このパソコンで最後に書き出した<b>第${emPrev.version}版</b>（${esc(emPrev.exportedAt)}）と比べて 追加・キャンセル・変更 に印を付けています → 次の書き出しは<b>第${emPrev.version + 1}版</b></span><button class="ghost" id="emPrevClear">比較をやめる</button></div>` : ''}
     <p class="note" style="margin:10px 0 0">${parsed.hasSlot ? '枠は「肉処理 製造枠」列から（メイン冷凍・サブ冷凍・餃子・キット・米飯課・宅配・販促・その他。空欄/0は対象外）。' : '枠は分類から：冷凍品＝メイン、冷凍(箱)＝サブ、販売用餃子/通販＝餃子（品目名に「餃子」を含むものは分類に関係なく餃子）。'}期間は上の開始日・終了日（${md($('from').value)}〜${md($('to').value)}）。</p></div>`;
+  h += EM_RULES;
   if (emPrev) {
     const chg = emChanges(days);
-    h += emPrev.edited.length ? `<details class="alert" open><summary>⚠ 前回のExcelで計画の文字が直接書き換えられたセル（${emPrev.edited.length}件・引き継いでいません）</summary><table><tr><th>日付</th><th>枠</th><th>セルの内容</th></tr>${emPrev.edited.map(e =>
-      `<tr><td>${md(e.date)}</td><td>${esc(e.col)}</td><td>${esc(e.text)}</td></tr>`).join('')}</table><p class="note">計画の数字は在庫表で直してください。</p></details>` : '';
     h += `<div class="panel noprint"><div class="row"><b>前回（第${emPrev.version}版）からの変更：${chg.length}件</b>
       ${chg.length ? '<button class="ghost" id="emPrintChg">変更連絡を印刷</button>' : ''}</div>
       ${chg.length ? `<table class="chgt"><tr><th>日付</th><th>区分</th><th>枠</th><th>品目名</th><th>前回</th><th>今回</th></tr>${chg.map(c =>
@@ -1075,7 +1062,6 @@ async function saveEmStyled(days, detail, filename) {
     ...(it.note ? [{ text: ` ${it.note}`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : [])];
   const chgRun = c => ({ text: c.type === '変更' ? `【変更 ${c.before}→】` : `【${c.type}】`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } });
   const lineRuns = l => {
-    if (l.manual) return [{ text: l.manual, font: { size: FS } }];
     if (l.cancel) return [chgRun({ type: 'キャンセル' }), { text: `${l.cancel.name} ${emPlanText(l.cancel)}`, font: { size: FS, strike: true, color: { argb: 'FF555555' } } }];
     if (l.zero) return [{ text: `${l.it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }];
     const pre = l.change ? [chgRun(l.change)] : [];
@@ -1083,7 +1069,7 @@ async function saveEmStyled(days, detail, filename) {
     return [...pre, ...runs(l.it, l.tag)];
   };
   const joinLines = ls => ls.flatMap((l, j) => j ? [{ text: '\n', font: { size: FS } }, ...l] : l);
-  // _data: the plan as exported plus what the tool wrote in each cell, read back by loadEmPrev next time
+  // The plan as exported, remembered in this browser for the next comparison
   const data = [['meta', version, exportedAt, $('from').value, $('to').value, $('fileinfo').textContent]];
 
   days.forEach((d, n) => {
@@ -1093,9 +1079,7 @@ async function saveEmStyled(days, detail, filename) {
     row.getCell(1).value = `${dt.getMonth() + 1}/${dt.getDate()}`;
     row.getCell(2).value = WD[w];
     EM_COLS.forEach(([k], i) => {
-      const gen = cols[k].filter(l => !l.manual).map(lineRuns), typed = cols[k].filter(l => l.manual).map(lineRuns);
-      data.push(['gen', d.key, k, 4 + n, 3 + i, joinLines(gen).map(r => r.text).join('')]);
-      if (gen.length || typed.length) row.getCell(3 + i).value = { richText: joinLines([...gen, ...typed]) };
+      if (cols[k].length) row.getCell(3 + i).value = { richText: joinLines(cols[k].map(lineRuns)) };
     });
     // No fixed row height: Excel auto-fits on open and again whenever someone types an addition into a cell
     const color = w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000';
@@ -1126,8 +1110,6 @@ async function saveEmStyled(days, detail, filename) {
       r.eachCell({ includeEmpty: true }, (cell, i) => { if (i > 6) return; cell.font = { size: FS, bold: i === 2 || i === 6 }; cell.border = border; cell.alignment = { vertical: 'middle', wrapText: true }; });
     });
   }
-  const hid = book.addWorksheet('_data', { state: 'veryHidden' });
-  data.forEach(r => hid.addRow(r));
   emRememberExport(data);
   emPrevOff = false;
 
