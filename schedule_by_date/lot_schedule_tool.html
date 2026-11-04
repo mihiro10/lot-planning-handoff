@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日別ロット予定</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--alt:#e8f0f8;--bg:#f7f7f5;--card:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5d8a;--accent-bg:#e8eff6;--zero:#a33;--zero-bg:#fbeeee;--wknd:#f1efe8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#21211f;--ink:#ecebe6;--muted:#9b9a93;--line:#3a3935;--accent:#8fb6dd;--accent-bg:#24303b;--zero:#e08a8a;--zero-bg:#3a2424;--wknd:#2a2926;--alt:#232c36}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+#drop{border:2px dashed var(--line);border-radius:10px;background:var(--card);padding:28px;text-align:center;cursor:pointer;transition:.15s}
+#drop.over{border-color:var(--accent);background:var(--accent-bg)}
+#drop b{color:var(--accent)}
+#fileinfo{color:var(--muted);margin-top:8px;font-size:13px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+input[type=date],select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+.cats{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px}
+.cats label{display:flex;gap:5px;align-items:center;font-size:13px}
+.cats .n{color:var(--muted);font-size:11px}
+button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+.stats{display:flex;gap:24px;flex-wrap:wrap;margin:20px 0 8px;color:var(--muted);font-size:13px}
+.stats b{color:var(--ink);font-size:18px;display:block}
+.day{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:10px;overflow:hidden;break-inside:avoid}
+.day h2{font-size:15px;margin:0;padding:8px 14px;background:var(--accent-bg);display:flex;justify-content:space-between}
+.day.we h2{background:var(--wknd)}
+.day h2 span{color:var(--muted);font-weight:normal;font-size:13px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:6px 14px;border-top:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:normal}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.cat{color:var(--muted);font-size:12px;white-space:nowrap}
+td.code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted)}
+tr.zero td{color:var(--zero);background:var(--zero-bg)}
+tr.zero td.name{text-decoration:line-through}
+.note{font-size:12px;color:var(--muted)}
+.empty{color:var(--muted);padding:10px 14px;font-size:13px}
+.err{color:var(--zero);margin-top:10px}
+.alert{border:1px solid var(--zero);background:var(--zero-bg);border-radius:10px;padding:10px 14px;margin-top:16px}
+.alert summary{cursor:pointer;font-weight:bold;color:var(--zero)}
+.alert table{margin-top:8px;font-size:13px}
+.alert td,.alert th{padding:4px 8px}
+.alert .bad{color:var(--zero);font-weight:bold}
+.alert .sug{color:var(--accent);font-weight:bold}
+.places{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px}
+.places label{display:flex;gap:5px;align-items:center;font-size:13px}
+.places .n{color:var(--muted);font-size:11px}
+.places label.unk{color:var(--zero)}
+.flt{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.flt .h{font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
+.flt .h a{color:var(--accent);cursor:pointer}
+td.place{font-size:12px;color:var(--muted)}
+td.place .bad{color:var(--zero)}
+.tabs{display:flex;gap:6px;margin-top:16px}
+.tabs button{background:transparent;color:var(--muted);border-color:var(--line)}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.mx{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:10px}
+.mx table{font-size:12px}
+.mx td,.mx th{padding:4px 6px;white-space:nowrap;border:1px solid var(--line);text-align:center}
+.mx td.name,.mx th.name{text-align:left;position:sticky;left:0;background:var(--card)}
+.mx td.alt,.mx th.alt{background:var(--alt)}
+.mx td.z{color:var(--zero);background:var(--zero-bg)}
+.mx th.we{background:var(--wknd)}
+@media (max-width:600px){td.cat,th.cat,td.code,th.code{display:none}}
+/* One-page print calendar (A4 landscape). Laid out off-screen so it can be measured, shown only when printing */
+@page{size:A4 landscape;margin:7mm}
+#printview{-webkit-print-color-adjust:exact;print-color-adjust:exact;position:absolute;left:-10000px;top:0;visibility:hidden;width:283mm;color:#000;background:#fff}
+#printview h1{font-size:15px;margin:0 0 3px;display:flex;justify-content:space-between}
+#printview h1 span{font-weight:normal;font-size:11px}
+.cal{width:100%;border-collapse:collapse;table-layout:fixed}
+.cal th{font-size:11px;border:1px solid #000;padding:1px;text-align:center;color:#000;background:#eee}
+.cal td{border:1px solid #000;padding:1px 3px;vertical-align:top;font-size:var(--fs,10.5px);line-height:1.2}
+.cal td.out{background:#f3f3f3}
+.cal .dn{font-weight:bold;font-size:1.15em}
+.cal .it{border-top:1px dotted #999;overflow:hidden}
+.cal .it .q{float:right;white-space:nowrap;font-weight:bold;margin-left:4px}
+.cal .it.z{color:#777;text-decoration:line-through}
+.cal .nt{font-size:.85em;color:#444}
+.cal.inst td{height:9mm;vertical-align:middle;font-size:12px}
+.mxpage{break-before:page}
+.mxpage:first-child{break-before:auto}
+.gp{width:100%;border-collapse:collapse;table-layout:fixed}
+.gp thead{display:table-header-group}
+.gp tr{break-inside:avoid}
+.gp th,.gp td{border:1px solid #000;padding:1px 3px;color:#000}
+.gp th{font-size:11px;background:#eee;text-align:center;font-weight:bold}
+.gp th.we{background:#d9d9d9}
+.gp th.sun{color:#b00}.gp th.sat{color:#03a}
+.gp td{height:11mm;font-size:13px;text-align:center;vertical-align:middle}
+.gp td.nm{text-align:left;font-size:11px;line-height:1.2}
+.gp td.nm small{display:block;color:#555;font-size:9px}
+.gp td.u{font-size:11px}
+.gp td.we{background:#f3f3f3}
+.gp td.alt,.gp th.alt{background:#e3edf8}
+.gp td.alt.we{background:#d3dfec}
+.gp th.alt.we{background:#c8d6e6}
+.gp td b{font-size:15px}
+.gp td.z b{text-decoration:line-through;color:#777}
+.gp td .nt{display:block;font-size:8px;color:#444;line-height:1.1}
+.gp td.tot{font-size:11px}
+.mx.em td{white-space:normal}
+.mx.em td.cell{min-width:0!important;width:auto}
+.em td.slot{font-weight:bold;white-space:normal;min-width:90px}
+.em .cell{font-size:12px;line-height:1.3}
+.em .cell .tag{font-size:10px;color:var(--muted)}
+.em .cell .over{color:var(--zero);font-weight:bold}
+.em .cell.free{background:var(--accent-bg)}
+.em .cell .zz{color:var(--muted);text-decoration:line-through;font-size:11px}
+.em .stat.ng{color:var(--zero);font-weight:bold}
+.gp td.em{height:24mm;font-size:12px;text-align:left;vertical-align:top;line-height:1.25}
+.gp td.em b{font-size:13px}
+.gp td.em .tag{font-size:9px;color:#555}
+.gp td.em .over{color:#b00;font-weight:bold}
+.gp td.em .zz{text-decoration:line-through;color:#777;font-size:10px}
+.gp td.st{height:7mm;font-size:10px;text-align:center}
+.gp td.st.ng{color:#b00;font-weight:bold}
+.empage{page:empage;width:196mm}
+@page empage{size:A4 portrait;margin:7mm}
+#printview:has(.empage){width:196mm}
+.ev{width:100%;border-collapse:collapse;table-layout:fixed}
+.ev th,.ev td{border:1px solid #000;padding:2px 4px;color:#000;vertical-align:top}
+.ev th{background:#eee;font-size:11px;text-align:center}
+.ev td{font-size:var(--fs,12px);line-height:1.3}
+.ev td.dt{text-align:center;vertical-align:middle;font-weight:bold;font-size:calc(var(--fs,12px) * 1.15)}
+.ev td.dt.sun{color:#b00}.ev td.dt.sat{color:#03a}
+.ev tr.we td{background:#f3f3f3}
+.ev td b{font-size:calc(var(--fs,12px) * 1.1)}
+.ev .tag{font-size:.8em;color:#555}
+.ev .over{color:#b00;font-weight:bold}
+.ev .zz{text-decoration:line-through;color:#777;font-size:.85em}
+.ev td.st{text-align:center;vertical-align:middle;font-size:.85em}
+.ev td.st.ng{color:#b00;font-weight:bold}
+/* 日付×枠 sheet: Excel-style colour headers; on screen it is a white "paper" preview */
+/* Sized for older readers: 早朝 sheet text starts at 20px and only shrinks if a page overflows */
+.evx th{color:#fff;font-size:var(--fs,15px);line-height:1.15;padding:3px 1px;border-color:#000}
+.evx th:nth-child(-n+2){background:#555}
+.evx tr.alt td{background:#e8f0f8}
+.evx td.dt{padding:2px 1px;font-size:var(--fs,16px);white-space:nowrap}
+.evx th:nth-child(-n+2){white-space:nowrap}
+.evx .tag{font-size:.85em;color:#333}
+.evx .zz{font-size:.9em}
+.empage h1{font-size:20px!important}.empage h1 span{font-size:12px!important}
+.evfoot{font-size:11px;margin:3px 0 0}
+.evx tr.ng td{background:#fbe3e3}
+.evwrap{background:#fff;color:#000;border:1px solid var(--line,#ccc);border-radius:8px;padding:8px;overflow-x:auto}
+.evwrap .evx{min-width:960px}
+.evwrap .evx td{height:40px;font-size:16px}
+.seg{display:inline-flex}
+.seg button{border-radius:0;background:transparent;color:inherit;border:1px solid currentColor;opacity:.6}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0;border-left:0}
+.seg button.on{opacity:1;font-weight:bold}
+.calpage{break-before:page}
+.calpage:first-child{break-before:auto}
+.cal .it .oth{font-size:.8em;color:#555}
+.cal.inst td:nth-child(4),.cal.inst td:nth-child(6){text-align:right}
+.cal th.sun,.cal td.sun .dn{color:#b00}.cal th.sat,.cal td.sat .dn{color:#03a}
+@media print{
+  body{background:#fff}
+  main{max-width:none;padding:0}
+  main>*:not(#printview){display:none!important}
+  #printview{position:static;visibility:visible}
+}
+cal th.sat,.cal td.sat .dn{color:#03a}
+}
+</style>
+<style id="emPageStyle"></style>
+</head>
+<body>
+<main>
+<h1>日別ロット予定</h1>
+<p class="sub">在庫表のExcelをドロップすると、「計画」の行から日別の製造予定を出します。ファイルはこのブラウザ内だけで処理されます。</p>
+
+<div id="drop">Excelファイルをここにドロップ、または <b>クリックして選択</b>
+  <input id="file" type="file" accept=".xlsx,.xlsm,.xls" hidden>
+  <div id="fileinfo"></div>
+</div>
+<div id="err" class="err"></div>
+
+<div id="controls" class="panel" hidden>
+  <div class="row">
+    <label class="f">シート<select id="sheet"></select></label>
+    <label class="f">開始日<input type="date" id="from"></label>
+    <label class="f">終了日<input type="date" id="to"></label>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="showZero" checked>0（中止・変更）も表示</label>
+  </div>
+  <div class="cats" id="cats"></div>
+  <div class="flt" id="placeFilter" hidden>
+    <label class="f"><span><span id="placeLabel">作業場所</span>で検索（含む）</span>
+      <input type="search" id="placeQ" list="placeOpts" placeholder="例：肉処理　／　複数は「、」区切り（どれかを含む）" style="font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);width:min(420px,100%)">
+    </label>
+    <datalist id="placeOpts"></datalist>
+  </div>
+  <div class="row noprint" style="margin-top:14px">
+    <button id="csv">CSVダウンロード</button>
+    <button class="ghost" id="print">印刷</button>
+    <button class="ghost" id="allc">分類すべて</button>
+    <button class="ghost" id="defc">冷凍のみ</button>
+  </div>
+</div>
+
+<div id="placeAlert"></div>
+<div id="out"></div>
+<div id="printview"></div>
+</main>
+
+<script>
+const DEFAULT_CATS = ['冷凍品', '冷凍(箱)', '販売用餃子/通販'];
+const WD = ['日', '月', '火', '水', '木', '金', '土'];
+
+// Official 作業場所 names (formerly 製造場所). A sheet named 作業場所リスト / 部署リスト / 製造場所リスト in the
+// dropped workbook (names in column A) overrides this built-in list.
+const DEFAULT_PLACES = ['昼間根菜カット', '昼間野菜仕込み', '早朝野菜処理', '昼間サラダ室', '早朝サラダ室', '昼間肉処理室', '早朝肉処理室',
+  '昼間魚処理室', '早朝魚処理室', '昼間厨房①', '早朝厨房', '昼間厨房②', '昼間パッケージ室', '早朝パッケージ室', '昼間仕分室', '早朝仕分室',
+  '第2工場', '米飯課', '米飯課　早朝厨房', '米飯課　昼間厨房', '米飯課　早朝パッケージ室', '米飯課　昼間パッケージ室', '早朝米飯厨房'];
+const PLACE_LIST_SHEETS = ['作業場所リスト', '部署リスト', '製造場所リスト'];
+// Shorthand seen in existing files → official name. Used ONLY for suggestions; matching itself is exact.
+const PLACE_ALIASES = {
+  '早朝肉': '早朝肉処理室', '早肉処理': '早朝肉処理室', '昼肉処理': '昼間肉処理室', '早朝魚': '早朝魚処理室', '昼魚処理': '昼間魚処理室',
+  '早朝サラダ': '早朝サラダ室', '昼サラダ': '昼間サラダ室', '早朝パッケ': '早朝パッケージ室', '昼パッケ': '昼間パッケージ室',
+  '昼間厨房': '昼間厨房①', '昼厨房': '昼間厨房①', '昼間厨房二番': '昼間厨房②', '第二工場': '第2工場', '第二': '第2工場',
+  '米飯課昼': '米飯課　昼間厨房', '米飯昼厨房': '米飯課　昼間厨房', '米飯早朝': '米飯課　早朝厨房', '米飯課早朝': '米飯課　早朝厨房',
+  '昼カット': '昼間根菜カット', '昼間カット': '昼間根菜カット', '根菜カット': '昼間根菜カット',
+  '早朝野菜': '早朝野菜処理', '早朝野菜仕込み': '早朝野菜処理', '早朝野菜仕込み①': '早朝野菜処理', '早朝野菜仕込み②': '早朝野菜処理',
+  '早朝野菜仕込み③': '早朝野菜処理', '早朝根菜カット': '早朝野菜処理', '早朝カット': '早朝野菜処理', '早朝野菜、早朝サラダ': '早朝野菜処理', '昼野菜': '昼間野菜仕込み', '昼間仕込み': '昼間野菜仕込み',
+  '仕分': '昼間仕分室', '仕分室': '昼間仕分室', '早朝仕分': '早朝仕分室'
+};
+let PLACES = DEFAULT_PLACES;
+const PLACE_SEP = /[、,，・\/／\n]+/; // several places in one cell
+
+// Loose key for suggestions only: full/half width, spaces, ①→1
+const looseKey = s => String(s).normalize('NFKC').replace(/[\s　]/g, '');
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function suggestPlace(text) {
+  const k = looseKey(text);
+  const same = PLACES.find(p => looseKey(p) === k);
+  if (same) return same;
+  const alias = Object.entries(PLACE_ALIASES).find(([a]) => looseKey(a) === k);
+  if (alias && PLACES.includes(alias[1])) return alias[1];
+  let best = null, bestD = Infinity;
+  for (const p of PLACES) { const d = editDistance(k, looseKey(p)); if (d < bestD) { bestD = d; best = p; } }
+  return bestD <= Math.max(1, Math.floor(k.length / 3)) ? best : '';
+}
+// Strict: each part must equal an official name exactly
+function checkPlaces(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { ok: [], bad: [{ text: '（空欄）', sug: '' }] };
+  const ok = [], bad = [];
+  for (const part of text.split(PLACE_SEP).map(x => x.trim()).filter(Boolean)) {
+    if (PLACES.includes(part)) ok.push(part); else bad.push({ text: part, sug: suggestPlace(part) });
+  }
+  return { ok, bad };
+}
+function loadPlaceList(workbook) {
+  const name = workbook.SheetNames.find(n => PLACE_LIST_SHEETS.includes(n.trim()));
+  if (!name) return DEFAULT_PLACES;
+  const vals = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: null })
+    .map(r => r && r[0] != null ? String(r[0]).trim() : '').filter(v => v && !/^(部署|作業場所|製造場所)/.test(v));
+  return vals.length ? vals : DEFAULT_PLACES;
+}
+const $ = id => document.getElementById(id);
+let wb = null, parsed = null, view = 'day';
+
+// Normalise full-width parens/spaces so "冷凍（箱）" and "冷凍(箱)" match
+const norm = s => String(s ?? '').replace(/（/g, '(').replace(/）/g, ')').replace(/\s+/g, '').trim();
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+
+function toYMD(v) {
+  if (v instanceof Date) return { y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate() };
+  if (typeof v === 'number' && v > 30000 && v < 80000) {
+    const p = XLSX.SSF.parse_date_code(v);
+    return { y: p.y, m: p.m, d: p.d };
+  }
+  return null;
+}
+function num(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[,，\s]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+// Find the header row (contains 行種別) and map columns by name
+function parseSheet(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  let h = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) if ((rows[i] || []).some(c => norm(c) === '行種別')) { h = i; break; }
+  if (h < 0) return null;
+  const hdr = rows[h];
+  const col = name => hdr.findIndex(c => norm(c).startsWith(name));
+  const C = { cat: col('分類'), code: col('コード'), name: col('品目名'), lot: col('ロット(一回'), type: col('行種別') };
+  C.unit = col('ロット単位') >= 0 ? col('ロット単位') : col('計画単位');
+  C.cs = col('CS/コンテナ');
+  C.place = col('作業場所') >= 0 ? col('作業場所') : col('製造場所'); // older files still say 製造場所
+  const placeLabel = C.place >= 0 ? norm(hdr[C.place]) : '作業場所';
+  C.slot = col('肉処理製造枠');
+  const firstRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').s.r + 1; // Excel row number of rows[0]
+  const dates = [];
+  hdr.forEach((v, i) => { if (i > C.type) { const d = toYMD(v); if (d) dates.push({ i, ...d, key: iso(d) }); } });
+  if (!dates.length) return null;
+
+  // Row labels vary between files (備考 / 備考/販促, 計画（倍）/ 計画（本）/ 計画（p）…),
+  // so match by prefix and take the unit from the label's brackets.
+  const unitOf = t => (t.match(/\(([^)]+)\)/) || [])[1] || '';
+  const blocks = [];
+  let cur = null;
+  for (let r = h + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const t = norm(row[C.type]);
+    if (t.startsWith('備考')) { // first row of each product block
+      cur = { cat: String(row[C.cat] ?? '').trim(), code: row[C.code] ?? '', name: String(row[C.name] ?? '').trim(), lot: num(row[C.lot]), cs: C.cs >= 0 ? num(row[C.cs]) : null, unit: String(row[C.unit] ?? ''), notes: row, plan: null, planUnit: '', qty: null, excelRow: firstRow + r,
+        placeRaw: C.place >= 0 ? String(row[C.place] ?? '').trim() : '', slot: C.slot >= 0 ? norm(row[C.slot]) : '' };
+      cur.place = C.place >= 0 ? checkPlaces(cur.placeRaw) : { ok: [], bad: [] };
+      blocks.push(cur);
+    } else if (cur && t.startsWith('計画') && !cur.plan) { cur.plan = row; cur.planUnit = unitOf(t); }
+    else if (cur && t.startsWith('入庫予定数') && !cur.qty) { cur.qty = row; if (unitOf(t)) cur.unit = unitOf(t); }
+  }
+
+  const items = [];
+  blocks.forEach((b, order) => {
+    if (!b.plan || !b.name) return;
+    for (const d of dates) {
+      const p = num(b.plan[d.i]);
+      if (p === null) continue;
+      // 計画 × ロット is the quantity produced that day (入庫予定数 itself is shifted by lead time)
+      let q = b.lot !== null ? Math.floor(p * b.lot + 1e-9) : (b.qty ? num(b.qty[d.i]) : null);
+      if (b.lot === null && q === 0 && p > 0) q = null; // no lot size entered → quantity unknown, not 0
+      // 計画 c/s = 計画 × ロット × CS/コンテナ, unrounded to 2 decimals like the Google sheet (e.g. 1200枚 → 9.23 c/s)
+      const cs = b.lot !== null && b.cs > 0 ? Math.round(p * b.lot * b.cs * 100) / 100 : null;
+      const note = b.notes[d.i];
+      items.push({ date: d.key, y: d.y, m: d.m, d: d.d, cat: b.cat, code: b.code, name: b.name, plan: p, planUnit: b.planUnit, order, qty: q, cs, unit: b.unit, note: note == null ? '' : String(note), places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot });
+    }
+  });
+  // Every named product block is checked, planned or not, so the planner can fix them all
+  const placeIssues = C.place < 0 ? [] : blocks.filter(b => b.name && b.place.bad.length)
+    .map(b => ({ row: b.excelRow, code: b.code, name: b.name, raw: b.placeRaw, bad: b.place.bad }));
+  return { items, dates, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0 };
+}
+
+function loadFile(f) {
+  $('err').textContent = '';
+  $('fileinfo').textContent = '読み込み中… ' + f.name;
+  const fr = new FileReader();
+  fr.onload = e => {
+    try {
+      wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+      PLACES = loadPlaceList(wb);
+      const good = wb.SheetNames.filter(n => parseSheet(wb.Sheets[n]));
+      if (!good.length) throw new Error('「行種別」列と日付ヘッダーのあるシートが見つかりません。');
+      $('sheet').innerHTML = good.map(n => `<option>${n}</option>`).join('');
+      $('fileinfo').textContent = f.name;
+      selectSheet(good[good.length - 1]);
+      $('controls').hidden = false;
+    } catch (ex) { $('err').textContent = 'エラー: ' + ex.message; $('fileinfo').textContent = ''; }
+  };
+  fr.readAsArrayBuffer(f);
+}
+
+function selectSheet(name) {
+  $('sheet').value = name;
+  parsed = parseSheet(wb.Sheets[name]);
+  const counts = {};
+  parsed.items.forEach(it => counts[it.cat] = (counts[it.cat] || 0) + 1);
+  const cats = Object.keys(counts).filter(Boolean).sort();
+  const isDef = c => DEFAULT_CATS.some(dc => norm(dc) === norm(c));
+  const anyDef = cats.some(isDef); // files without the frozen categories (e.g. 肉処理) start with everything ticked
+  $('cats').innerHTML = cats.map(c => `<label><input type="checkbox" value="${c}" ${!anyDef || isDef(c) ? 'checked' : ''}>${c}<span class="n">${counts[c]}</span></label>`).join('');
+  // Default range: current month, clamped to the sheet's dates
+  const first = parsed.dates[0].key, last = parsed.dates[parsed.dates.length - 1].key;
+  const now = new Date();
+  let f = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+  let t = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate())}`;
+  if (f < first || f > last) { f = first; t = parsed.dates[Math.min(30, parsed.dates.length - 1)].key; }
+  $('from').min = $('to').min = first; $('from').max = $('to').max = last;
+  $('from').value = f; $('to').value = t;
+  buildPlaceFilter();
+  renderPlaceAlert();
+  render();
+}
+
+function buildPlaceFilter() {
+  $('placeFilter').hidden = !parsed.hasPlace;
+  if (!parsed.hasPlace) return;
+  $('placeLabel').textContent = parsed.placeLabel;
+  // Autocomplete: official names that appear in this file
+  const used = new Set(parsed.items.flatMap(it => it.places));
+  $('placeOpts').innerHTML = PLACES.filter(p => used.has(p)).map(p => `<option value="${esc(p)}">`).join('');
+}
+// Contains-search on the raw cell text (a cell can hold several places). Width/space differences are
+// ignored so typing 肉処理 finds 昼間肉処理室 and also mis-typed cells. Several terms with 「、」 = any of them.
+function placeOk(it, terms) {
+  if (!parsed.hasPlace || !terms.length) return true;
+  const hay = looseKey(it.placeRaw);
+  return terms.some(t => hay.includes(t));
+}
+const selectedPlaces = () => String($('placeQ').value || '').split(/[、,，]+/).map(looseKey).filter(Boolean);
+
+function renderPlaceAlert() {
+  const issues = parsed.placeIssues;
+  if (!issues.length) { $('placeAlert').innerHTML = ''; return; }
+  const L = esc(parsed.placeLabel);
+  $('placeAlert').innerHTML = `<details class="alert" ${issues.length <= 10 ? 'open' : ''}><summary>⚠ ${L}が一覧と一致しません（${issues.length}品目）— Excelで修正してください</summary>
+    <table><tr><th>行</th><th>コード</th><th>品目名</th><th>入力</th><th>一致しない部分</th><th>もしかして</th></tr>
+    ${issues.map(i => `<tr><td>${i.row}</td><td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.raw) || '（空欄）'}</td>
+      <td>${i.bad.map(b => `<span class="bad">${esc(b.text)}</span>`).join('<br>')}</td>
+      <td>${i.bad.map(b => b.sug ? `<span class="sug">${esc(b.sug)}</span>` : '—').join('<br>')}</td></tr>`).join('')}
+    </table><p class="note">一覧と完全に一致する名前だけが有効です（全角/半角・スペース・①も区別）。複数の場合は「、」で区切ってください。（検索は「含む」なので、修正前でも表示されます）</p></details>`;
+}
+
+function selected() {
+  const cats = new Set([...$('cats').querySelectorAll('input:checked')].map(i => i.value));
+  const f = $('from').value, t = $('to').value, z = $('showZero').checked;
+  const ps = selectedPlaces();
+  return parsed.items.filter(it => cats.has(it.cat) && placeOk(it, ps) && it.date >= f && it.date <= t && (z || it.plan !== 0))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order); // same order as the Excel rows
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = n => n === null ? '' : n.toLocaleString('ja-JP');
+
+function render() {
+  if (!parsed) return;
+  const items = selected();
+  const live = items.filter(i => i.plan !== 0);
+  const days = parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value);
+  let html = `<div class="stats"><div><b>${live.length}</b>製造予定</div><div><b>${new Set(live.map(i => i.date)).size}</b>製造日</div><div><b>${new Set(live.map(i => i.name)).size}</b>品目</div><div><b>${items.length - live.length}</b>0（中止・変更）</div></div>
+  <div class="tabs noprint"><button data-v="day" class="${view === 'day' ? 'on' : ''}">日別</button><button data-v="mx" class="${view === 'mx' ? 'on' : ''}">品目×日付</button><button data-v="inst" class="${view === 'inst' ? 'on' : ''}">肉専用指示書発行</button><button data-v="dept" class="${view === 'dept' ? 'on' : ''}">作業場所別</button><button data-v="em" class="${view === 'em' ? 'on' : ''}">早朝肉処理指示</button></div>`;
+
+  if (view === 'day') {
+    for (const d of days) {
+      const list = items.filter(i => i.date === d.key);
+      const wd = new Date(d.y, d.m - 1, d.d).getDay();
+      html += `<div class="day ${wd === 0 || wd === 6 ? 'we' : ''}"><h2>${d.m}/${d.d}（${WD[wd]}）<span>${list.filter(i => i.plan !== 0).length}件</span></h2>`;
+      if (!list.length) { html += `<div class="empty">予定なし</div></div>`; continue; }
+      html += `<table><tr><th class="cat">分類</th><th class="code">コード</th><th>品目名</th>${parsed.hasPlace ? `<th class="cat">${esc(parsed.placeLabel)}</th>` : ''}<th class="num">計画</th><th class="num">数量</th><th>備考</th></tr>`;
+      for (const i of list) html += `<tr class="${i.plan === 0 ? 'zero' : ''}"><td class="cat">${esc(i.cat)}</td><td class="code">${esc(i.code)}</td><td class="name">${esc(i.name)}</td>${parsed.hasPlace ? `<td class="place">${i.places.map(esc).join('、')}${i.placeBad ? `${i.places.length ? '、' : ''}<span class="bad">⚠${esc(i.placeRaw) || '空欄'}</span>` : ''}</td>` : ''}<td class="num">${fmt(i.plan)}${esc(i.planUnit)}</td><td class="num">${fmt(i.qty)} ${esc(i.unit)}</td><td class="note">${esc(i.note)}</td></tr>`;
+      html += `</table></div>`;
+    }
+  } else if (view === 'inst') {
+    html += renderInst();
+  } else if (view === 'dept') {
+    html += renderDept();
+  } else if (view === 'em') {
+    html += renderEm();
+  } else {
+    html += `<div class="panel noprint"><div class="row">
+      <button id="mx10">10日間（明日から）</button>
+      <button class="ghost" id="mxPrint">印刷</button>
+      <button class="ghost" id="mxXlsx">Excelに書き出し</button>
+      ${parsed.hasPlace ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mxSplit" ${mxSplit ? 'checked' : ''}>${esc(parsed.placeLabel)}ごとにページを分ける</label>` : ''}
+      </div><p class="note" style="margin:10px 0 0">計画の数字を表示します。印刷は空欄も大きめのマスなので、変更があれば○や数字を書き込めます。</p></div>`;
+    const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+    html += `<div class="mx"><table><tr><th class="name">品目名</th><th>単位</th>${days.map((d, n) => { const wd = new Date(d.y, d.m - 1, d.d).getDay(); return `<th class="${wd === 0 || wd === 6 ? 'we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[wd]}</th>`; }).join('')}<th>合計</th></tr>`;
+    for (const p of prods) {
+      const mine = items.filter(i => i.order === p.order);
+      const tot = mine.reduce((s, i) => s + (i.plan || 0), 0);
+      html += `<tr><td class="name">${esc(p.name)}</td><td>${esc(p.planUnit)}</td>${days.map((d, n) => { const it = mine.find(i => i.date === d.key), a = n % 2 ? 'alt' : ''; return it ? `<td class="${a} ${it.plan === 0 ? 'z' : ''}" title="${esc(it.note)}">${fmt(it.plan)}</td>` : `<td class="${a}"></td>`; }).join('')}<td><b>${fmt(tot)}</b></td></tr>`;
+    }
+    html += `</table></div>`;
+  }
+  $('out').innerHTML = html;
+  $('out').querySelectorAll('.tabs button').forEach(b => b.onclick = () => { view = b.dataset.v; render(); });
+  if (view === 'inst') {
+    $('instDate').onchange = e => { instDate = e.target.value; render(); };
+    $('instCopy').onclick = copyInst;
+    $('instCsv').onclick = downloadInstCsv;
+    $('instPrint').onclick = () => window.print();
+    renderInstPrint();
+  } else if (view === 'em') {
+    $('em10').onclick = setTenDays;
+    $('emPaper').onchange = e => { emPaper = e.target.value; renderEmPrint(); };
+    $('out').querySelectorAll('.seg button').forEach(b => b.onclick = () => { emLayout = b.dataset.l; render(); });
+    $('emDate').onchange = e => { emDate = e.target.value; render(); };
+    $('emCopy').onclick = () => copyRows(emDayRows(true), $('emMsg'), $('emFallback'));
+    $('emXlsx').onclick = exportEmXlsx;
+    $('emPrintGrid').onclick = () => { emPrint = 'grid'; renderEmPrint(); window.print(); };
+    $('emPrintDay').onclick = () => { emPrint = 'day'; renderEmPrint(); window.print(); };
+    renderEmPrint();
+  } else if (view === 'mx') {
+    $('mx10').onclick = setTenDays;
+    $('mxPrint').onclick = () => window.print();
+    $('mxXlsx').onclick = () => exportMxXlsx(items);
+    if ($('mxSplit')) $('mxSplit').onchange = e => { mxSplit = e.target.checked; render(); };
+    renderMxPrint(items);
+  } else if (view === 'dept') {
+    $('deptPrint').onclick = () => window.print();
+    renderDeptPrint();
+  } else renderPrint(items);
+}
+
+// ---- 品目×日付 print: product rows × date columns of 計画, big cells to write changes in ----
+let mxSplit = false;
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function setTenDays() { // tomorrow + 10 days
+  const t = new Date(); t.setDate(t.getDate() + 1);
+  const e = new Date(t); e.setDate(e.getDate() + 9);
+  $('from').value = ymd(t); $('to').value = ymd(e); render();
+}
+
+// ---- 早朝肉処理指示: daily slots. 枠 comes from the 肉処理 製造枠 column, else from 分類. Each day must fit one of EM_PATTERNS. ----
+// 肉処理 製造枠 values (blank/0 = not 肉処理). Only メイン/サブ count toward EM_PATTERNS; the rest are their own columns.
+const EM_FRAME = { 'メイン冷凍': 'メイン', 'サブ冷凍': 'サブ', '餃子': '餃子', 'キット': 'キット', '米飯課・宅配': '米飯課・宅配', '米飯課/宅配': '米飯課・宅配',
+  '米飯課': '米飯課・宅配', '宅配': '米飯課・宅配', '販促': '販促', 'その他': 'その他' };
+const EM_SLOTS = { '冷凍品': 'メイン', '冷凍(箱)': 'サブ', '販売用餃子/通販': '餃子' }; // fallback by 分類, keys compared with norm()
+const EM_PATTERNS = [{ name: '通常', main: 1, sub: 1 }, { name: 'メイン2本', main: 2, sub: 0 }];
+const EM_FREE = ['餃子', 'キット', '米飯課・宅配', '販促', 'その他'];
+// Columns of the 計画表, same order and header colours as サンプル_早朝肉処理計画表_2026-10_現場回答反映.xlsx
+const EM_COLS = [['s1', 'メイン冷凍', '#2F5D8A', 22], ['s2', 'メイン②/サブ冷凍', '#4F7FAF', 15], ['餃子', '餃子', '#B5651D', 13], ['キット', 'キット', '#3C8C5A', 13],
+  ['米飯課・宅配', '米飯課・宅配', '#7A5C9E', 11], ['販促', '販促', '#C0392B', 14], ['その他', 'その他', '#666666', 12]];
+let emDate = null, emPrint = 'grid', emLayout = 'sheet';
+// Anything named 餃子 is the 餃子 slot whatever its 分類 (e.g. ちくやの浜松餃子 is filed under 冷凍(箱))
+const EM_GYOZA_NAME = /餃子/;
+const emSlotOf = it => {
+  if (parsed.hasSlot) return EM_FRAME[it.slot] || null;
+  const k = Object.keys(EM_SLOTS).find(c => norm(c) === norm(it.cat));
+  if (!k) return null;
+  return EM_GYOZA_NAME.test(it.name) ? '餃子' : EM_SLOTS[k];
+};
+
+function emDay(key) {
+  const all = parsed.items.filter(it => it.date === key && emSlotOf(it)).sort((a, b) => a.order - b.order);
+  const live = all.filter(it => it.plan !== 0);
+  const main = live.filter(it => emSlotOf(it) === 'メイン'), sub = live.filter(it => emSlotOf(it) === 'サブ');
+  const free = Object.fromEntries(EM_FREE.map(s => [s, live.filter(it => emSlotOf(it) === s)]));
+  const pat = EM_PATTERNS.find(p => main.length <= p.main && sub.length <= p.sub);
+  // Slot 1 = first main. Slot 2 = second main, else the sub. Anything beyond that is over capacity.
+  const slot1 = main.slice(0, 1), slot2 = main.length >= 2 ? main.slice(1, 2) : sub.slice(0, 1);
+  const over = main.length >= 2 ? [...main.slice(2), ...sub] : [...main.slice(1), ...sub.slice(1)];
+  let status, ng = false;
+  if (!pat) { ng = true; status = `⚠ 超過（メイン${main.length}・サブ${sub.length}）`; }
+  else if (main.length === 2) status = 'メイン2本';
+  else if (!main.length && !sub.length) status = live.length ? '冷凍なし' : '予定なし';
+  else status = main.length && sub.length ? '通常' : '空き枠あり';
+  return { key, all, live, main, sub, free, slot1, slot2, over, zero: all.filter(it => it.plan === 0), status, ng };
+}
+const emDays = () => parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value).map(d => emDay(d.key));
+const emQty = it => `${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <span class="tag">(${fmt(it.qty)}${esc(it.unit)})</span>` : ''}`;
+const emItem = (it, tag) => `<div>${tag ? `<span class="tag">${tag}</span> ` : ''}${esc(it.name)} <b>${emQty(it)}</b>${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</div>`;
+function emCells(day) {
+  const zeroIn = slot => day.zero.filter(it => emSlotOf(it) === slot).map(it => `<div class="zz">${esc(it.name)} 0</div>`).join('');
+  return {
+    s1: day.slot1.map(it => emItem(it)).join('') + zeroIn('メイン'),
+    s2: day.slot2.map(it => emItem(it, emSlotOf(it) === 'メイン' ? 'メイン②' : '')).join('') +
+        day.over.map(it => `<div class="over">⚠超過 ${esc(it.name)} ${emQty(it)}</div>`).join('') + zeroIn('サブ'),
+    ...Object.fromEntries(EM_FREE.map(s => [s, day.free[s].map(it => emItem(it)).join('') + zeroIn(s)]))
+  };
+}
+// 枠×日付 view: メイン・2枠目・餃子 always, other columns only when the period has any
+const emRows = days => EM_COLS.filter(([k]) => ['s1', 's2', '餃子'].includes(k) || days.some(d => d.all.some(it => emSlotOf(it) === k)));
+
+// Printable area (paper minus 7mm margins) for the one-sheet 計画表
+const EM_PAPER = { A4: { w: 196, h: 283 }, A3: { w: 283, h: 406 } };
+let emPaper = 'A4';
+
+// 日付×枠 sheet (the Excel layout): one row per date, every column shown so the crew can write in
+// Column widths follow the longest entry, so empty write-in columns don't squeeze the planned items into tiny text
+function emColWidths(days) {
+  const cells = days.map(emCells);
+  const len = html => Math.max(0, ...html.split('</div>').map(s => s.replace(/<[^>]+>/g, '').length));
+  const w = EM_COLS.map(([k]) => { const m = Math.max(...cells.map(c => len(c[k]))); return m ? Math.min(Math.max(m, 12), 34) / 2 : 7; });
+  const tot = w.reduce((a, b) => a + b, 0);
+  return w.map(x => x / tot * 100);
+}
+function emSheet(days, rowH) {
+  const cells = days.map(emCells), pct = rowH ? emColWidths(days) : EM_COLS.map(c => c[3]);
+  return `<table class="ev evx"><colgroup><col style="width:calc(var(--fs,16px) * 3.8)"><col style="width:calc(var(--fs,16px) * 1.9)">${pct.map(p => `<col style="width:${p.toFixed(1)}%">`).join('')}</colgroup>
+    <thead><tr><th>日付</th><th>曜日</th>${EM_COLS.map(c => `<th style="background:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>
+    ${days.map((d, i) => { const [y, m, dd] = d.key.split('-').map(Number), w = new Date(y, m - 1, dd).getDay(), wc = w === 0 ? 'sun' : w === 6 ? 'sat' : '';
+      return `<tr ${rowH ? `data-h="${rowH}"` : ''} class="${i % 2 ? 'alt' : ''} ${d.ng ? 'ng' : ''}"><td class="dt ${wc}">${m}/${dd}</td><td class="dt ${wc}">${WD[w]}</td>${EM_COLS.map(c => `<td>${cells[i][c[0]]}</td>`).join('')}</tr>`; }).join('')}
+    </tbody></table>`;
+}
+
+function emDayRows(withHeader) {
+  const day = emDay(emDate);
+  const [y, m, d] = emDate.split('-').map(Number), wd = WD[new Date(y, m - 1, d).getDay()];
+  const label = it => it === day.slot1[0] ? 'メイン冷凍' : day.slot2.includes(it) ? (emSlotOf(it) === 'メイン' ? 'メイン冷凍②' : 'サブ冷凍') : EM_FREE.includes(emSlotOf(it)) ? emSlotOf(it) : '⚠超過';
+  const rows = [...day.slot1, ...day.slot2, ...day.over, ...EM_FREE.flatMap(s => day.free[s])].map(it =>
+    [`${y}/${m}/${d}`, wd, label(it), it.code, it.name, it.plan, it.planUnit, it.qty ?? '', it.unit, '', it.note]);
+  return withHeader ? [['日付', '曜日', '枠', 'コード', '品目名', '計画', '計画単位', '数量', '単位', '出来高', '備考'], ...rows] : rows;
+}
+
+function renderEm() {
+  const first = parsed.dates[0].key, last = parsed.dates[parsed.dates.length - 1].key;
+  if (!emDate) { const t = new Date(); t.setDate(t.getDate() + 1); emDate = ymd(t); }
+  emDate = emDate < first ? first : emDate > last ? last : emDate;
+  const days = emDays();
+  if (!parsed.items.some(emSlotOf)) return `<div class="empty">${parsed.hasSlot ? '「肉処理 製造枠」が入った品目の計画がありません。' : 'このシートには 冷凍品・冷凍(箱)・販売用餃子/通販 の計画がありません（早朝の在庫表を入れてください）。'}</div>`;
+  const ng = days.filter(d => d.ng);
+  let h = ng.length ? `<details class="alert" open><summary>⚠ 枠オーバーの日があります（${ng.length}日）</summary><table><tr><th>日付</th><th>メイン</th><th>サブ</th><th>内容</th></tr>${ng.map(d =>
+    `<tr><td>${md(d.key)}</td><td>${d.main.length}</td><td>${d.sub.length}</td><td>${[...d.main, ...d.sub].map(it => esc(it.name)).join('、')}</td></tr>`).join('')}</table>
+    <p class="note">1日に「メイン1＋サブ1」または「メイン2・サブなし」まで。</p></details>` : '';
+  h += `<div class="panel noprint"><div class="row">
+    <button id="em10">10日間（明日から）</button>
+    <span class="seg"><button class="${emLayout === 'sheet' ? 'on' : ''}" data-l="sheet">日付×枠（印刷イメージ）</button><button class="${emLayout === 'grid' ? 'on' : ''}" data-l="grid">枠×日付</button></span>
+    <button class="ghost" id="emPrintGrid">計画表を印刷</button>
+    <label class="f">用紙<select id="emPaper">${Object.keys(EM_PAPER).map(p => `<option ${p === emPaper ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+    <button class="ghost" id="emXlsx">Excelに書き出し</button></div>
+    <p class="note" style="margin:10px 0 0">${parsed.hasSlot ? '枠は「肉処理 製造枠」列から（メイン冷凍・サブ冷凍・餃子・キット・米飯課・宅配・販促・その他。空欄/0は対象外）。' : '枠は分類から：冷凍品＝メイン、冷凍(箱)＝サブ、販売用餃子/通販＝餃子（品目名に「餃子」を含むものは分類に関係なく餃子）。'}期間は上の開始日・終了日（${md($('from').value)}〜${md($('to').value)}）。</p></div>`;
+  if (emLayout === 'sheet') h += `<div class="evwrap">${emSheet(days)}</div>`;
+  else {
+    h += `<div class="mx em"><table><tr><th class="name">枠</th>${days.map(d => { const [y, m, dd] = d.key.split('-').map(Number), w = new Date(y, m - 1, dd).getDay();
+      return `<th class="${w === 0 || w === 6 ? 'we' : ''}">${m}/${dd}<br>${WD[w]}</th>`; }).join('')}</tr>`;
+    const cells = days.map(emCells);
+    for (const [k, label] of emRows(days)) h += `<tr><td class="name slot">${label}</td>${cells.map((c, i) =>
+      `<td class="cell ${!c[k] && (k === 's1' || k === 's2') && days[i].status === '空き枠あり' ? 'free' : ''}" style="text-align:left;vertical-align:top">${c[k]}</td>`).join('')}</tr>`;
+    h += `<tr><td class="name slot">パターン</td>${days.map(d => `<td class="stat ${d.ng ? 'ng' : ''}">${d.status}</td>`).join('')}</tr></table></div>`;
+  }
+
+  // Daily instruction for one date
+  const rows = emDayRows(false);
+  h += `<div class="panel noprint" style="margin-top:16px"><div class="row">
+    <label class="f">指示日<input type="date" id="emDate" value="${emDate}" min="${first}" max="${last}"></label>
+    <button id="emCopy">Googleシート用にコピー</button>
+    <button class="ghost" id="emPrintDay">この日の指示を印刷</button>
+    <span id="emMsg" class="note"></span></div>
+    <textarea id="emFallback" hidden readonly style="width:100%;height:100px;margin-top:10px;font:12px ui-monospace,Menlo,monospace"></textarea></div>`;
+  h += `<div class="mx"><table><tr><th>枠</th><th>コード</th><th class="name">品目名</th><th>計画</th><th>数量</th><th>出来高</th><th>備考</th></tr>${rows.map(r =>
+    `<tr><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td class="name">${esc(r[4])}</td><td>${fmt(r[5])}${esc(r[6])}</td><td>${r[7] === '' ? '' : fmt(r[7]) + esc(r[8])}</td><td style="background:var(--accent-bg);min-width:60px"></td><td>${esc(r[10])}</td></tr>`).join('')
+    || `<tr><td colspan="7">この日の予定はありません</td></tr>`}</table></div>`;
+  return h;
+}
+
+function renderEmPrint() {
+  const file = esc($('fileinfo').textContent);
+  if (emPrint === 'day') {
+    const rows = emDayRows(false), day = emDay(emDate);
+    $('printview').innerHTML = `<h1>早朝肉処理指示　${md(emDate)}<span>${esc(day.status)}　｜　${file}</span></h1>
+      <table class="cal inst"><tr><th>枠</th><th>コード</th><th style="width:34%">品目名</th><th>計画</th><th>数量</th><th style="width:16%">出来高</th><th>備考</th></tr>${rows.map(r =>
+      `<tr><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td><td style="text-align:right">${fmt(r[5])}${esc(r[6])}</td><td style="text-align:right">${r[7] === '' ? '' : fmt(r[7]) + esc(r[8])}</td><td></td><td>${esc(r[10])}</td></tr>`).join('')}</table>`;
+    return;
+  }
+  // Whole period on one sheet; fitPrint picks the largest font that still fits the chosen paper
+  const days = emDays(), paper = EM_PAPER[emPaper];
+  $('emPageStyle').textContent = `@page empage{size:${emPaper} portrait;margin:7mm} .empage,#printview:has(.empage){width:${paper.w}mm}`;
+  $('printview').innerHTML = `<div class="empage"><h1>早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}<span>${file}</span></h1>
+    ${emSheet(days, (paper.h - 26) / Math.max(days.length, 1))}
+    <p class="evfoot">変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
+  fitPrint();
+}
+
+function gridPage(items, title, sub) {
+  const f = $('from').value, t = $('to').value;
+  const days = parsed.dates.filter(d => d.key >= f && d.key <= t);
+  const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+  const wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
+  const head = `<tr><th style="width:${days.length > 14 ? 44 : 62}mm">品目名</th><th style="width:11mm">単位</th>${days.map((d, n) => {
+    const w = wdOf(d); return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[w]}</th>`; }).join('')}<th style="width:14mm">合計</th></tr>`;
+  const rows = prods.map(p => {
+    const mine = items.filter(i => i.order === p.order);
+    const tot = mine.reduce((s, i) => s + (i.plan || 0), 0);
+    return `<tr><td class="nm">${esc(p.name)}<small>${esc(p.code)}${p.cat ? '　' + esc(p.cat) : ''}</small></td><td class="u">${esc(p.planUnit)}</td>${days.map((d, n) => {
+      const it = mine.find(i => i.date === d.key), w = wdOf(d), we = (w === 0 || w === 6 ? 'we' : '') + (n % 2 ? ' alt' : '');
+      return it ? `<td class="${we} ${it.plan === 0 ? 'z' : ''}"><b>${fmt(it.plan)}</b>${it.note ? `<span class="nt">${esc(it.note)}</span>` : ''}</td>` : `<td class="${we}"></td>`;
+    }).join('')}<td class="tot">${fmt(tot)}</td></tr>`;
+  }).join('');
+  return `<div class="mxpage"><h1>${esc(title)}　${md(f)}〜${md(t)}<span>${esc(sub)}</span></h1>
+    <table class="gp"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${days.length + 3}">予定なし</td></tr>`}</tbody></table>
+    <p style="font-size:9px;margin:3px 0 0">変更があれば数字を○で囲むか、新しい数字を書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
+}
+function renderMxPrint(items) {
+  const file = $('fileinfo').textContent;
+  if (mxSplit && parsed.hasPlace) {
+    $('printview').innerHTML = deptGroups().map(g => gridPage(g.items, `計画表　${g.place}`, file)).join('') || '<h1>この期間の予定はありません</h1>';
+  } else {
+    const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
+    $('printview').innerHTML = gridPage(items, '計画表', `${cats}　｜　${file}`);
+  }
+}
+
+// One calendar page: whole weeks (Sun–Sat) covering f..t. `place` (作業場所別) marks other places sharing the item.
+function calendarPage(items, f, t, title, sub, place) {
+  const [fy, fm, fd] = f.split('-').map(Number), [ty, tm, td] = t.split('-').map(Number);
+  const start = new Date(fy, fm - 1, fd); start.setDate(start.getDate() - start.getDay());
+  const end = new Date(ty, tm - 1, td); end.setDate(end.getDate() + (6 - end.getDay()));
+  let h = `<div class="calpage"><h1>${esc(title)} ${fm}/${fd}〜${tm}/${td}<span>${esc(sub)}</span></h1>
+  <table class="cal"><tr>${WD.map((w, i) => `<th class="${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</th>`).join('')}</tr>`;
+  const weeks = Math.round((end - start) / 864e5 + 1) / 7;
+  const rowH = (PAGE_H_MM - 16) / weeks;
+  for (const d = new Date(start); d <= end;) {
+    h += `<tr data-h="${rowH}">`;
+    for (let i = 0; i < 7; i++, d.setDate(d.getDate() + 1)) {
+      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const cls = [key < f || key > t ? 'out' : '', i === 0 ? 'sun' : i === 6 ? 'sat' : ''].join(' ');
+      const list = key < f || key > t ? [] : items.filter(it => it.date === key);
+      h += `<td class="${cls}"><div class="dn">${d.getMonth() + 1}/${d.getDate()}</div>` +
+        list.map(it => {
+          const oth = place && place !== DEPT_UNKNOWN ? others(it, place) : place === DEPT_UNKNOWN ? (it.placeRaw || '空欄') : '';
+          return `<div class="it ${it.plan === 0 ? 'z' : ''}"><span class="q">${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` → ${fmt(it.qty)}${esc(it.unit)}` : ''}</span>${esc(it.name)}${oth ? ` <span class="oth">[${esc(oth)}]</span>` : ''}${it.note ? ` <span class="nt">${esc(it.note)}</span>` : ''}</div>`;
+        }).join('') +
+        '</td>';
+    }
+    h += '</tr>';
+  }
+  return h + '</table></div>';
+}
+
+function renderPrint(items) {
+  const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
+  $('printview').innerHTML = calendarPage(items, $('from').value, $('to').value, 'ロット予定', `${cats}　｜　${$('fileinfo').textContent}`);
+  fitPrint();
+}
+
+// Step the font size down until each calendar page fits one A4 landscape page
+const PAGE_H_MM = 210 - 14;
+function fitPrint() {
+  for (const page of $('printview').querySelectorAll('.calpage, .empage')) {
+    const em = page.classList.contains('empage'), H = em ? EM_PAPER[emPaper].h : PAGE_H_MM;
+    const trs = [...page.querySelectorAll('tr[data-h]')];
+    // Prefer equal-height weeks; if that doesn't fit, let busy weeks grow (min 12mm) so the text can stay larger
+    fit: for (let fs = em ? 24 : 10.5; fs >= 5; fs -= 0.5) {
+      page.style.setProperty('--fs', fs + 'px');
+      for (const even of [true, false]) {
+        trs.forEach(tr => tr.style.height = even ? tr.dataset.h + 'mm' : (em ? '6mm' : '12mm'));
+        if (page.scrollHeight / (96 / 25.4) <= H - 2) break fit;
+      }
+    }
+  }
+}
+window.addEventListener('beforeprint', () => { if (view !== 'inst' && !(view === 'em' && emPrint === 'day')) fitPrint(); });
+
+// ---- 肉専用指示書発行: one day's plan in the floor sheet's column layout (nikushori_ideal.xlsx) ----
+const INST_HEADER = ['日付', '曜日', '分類', 'コード', '品目名', '計画', '計画単位', '計画　c/s単位', '出来高数', '出来高単位', '備考・連絡事項'];
+let instDate = null;
+
+function instItems() {
+  const cats = new Set([...$('cats').querySelectorAll('input:checked')].map(i => i.value));
+  const ps = selectedPlaces();
+  return parsed.items.filter(it => it.date === instDate && cats.has(it.cat) && placeOk(it, ps) && it.plan !== 0)
+    .sort((a, b) => a.order - b.order); // same order as the Excel rows
+}
+function instRows() {
+  return instItems().map(i => [`${i.y}/${i.m}/${i.d}`, WD[new Date(i.y, i.m - 1, i.d).getDay()], i.cat, i.code, i.name, i.plan, i.planUnit, i.cs ?? '', '', i.unit, i.note]);
+}
+function instTabName() {
+  const [y, m, d] = instDate.split('-');
+  return `${m}${d}（${WD[new Date(+y, m - 1, +d).getDay()]}）`;
+}
+
+function renderInst() {
+  const first = parsed.dates[0].key, last = parsed.dates[parsed.dates.length - 1].key;
+  if (!instDate) { // default: tomorrow, clamped to the sheet
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    instDate = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+  }
+  if (instDate < first) instDate = first;
+  if (instDate > last) instDate = last;
+  const items = instItems();
+  let h = `<div class="panel noprint"><div class="row">
+    <label class="f">製造日<input type="date" id="instDate" value="${instDate}" min="${first}" max="${last}"></label>
+    <button id="instCopy">Googleシート用にコピー</button>
+    <button class="ghost" id="instCsv">CSVダウンロード</button>
+    <button class="ghost" id="instPrint">印刷</button>
+    <span id="instMsg" class="note"></span></div>
+    <textarea id="instFallback" hidden readonly style="width:100%;height:120px;margin-top:10px;font:12px ui-monospace,Menlo,monospace"></textarea>
+    <p class="note" style="margin:10px 0 0">Googleシートで新しいタブ（例：<b>${esc(instTabName())}</b>）を作り、A1を選んで貼り付け（⌘V）。出来高数は現場で入力します。計画0（中止）は出しません。</p></div>`;
+  if (!items.length) return h + `<div class="empty">この日の予定はありません（分類の選択も確認してください）</div>`;
+  h += `<div class="mx"><table><tr>${INST_HEADER.map(c => `<th>${c}</th>`).join('')}</tr>`;
+  for (const r of instRows()) h += `<tr>${r.map((v, k) => `<td class="${k === 4 ? 'name' : ''}" style="${k === 8 ? 'background:var(--accent-bg);min-width:60px' : ''}">${esc(typeof v === 'number' && k !== 3 ? fmt(v) : v)}</td>`).join('')}</tr>`;
+  return h + `</table></div>`;
+}
+
+// Clipboard calls can hang (permission prompt, unfocused page) — give up after 1.5s and try the next method
+const within = (p, ms = 1500) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+const copyInst = () => copyRows([INST_HEADER, ...instRows()], $('instMsg'), $('instFallback'));
+
+// Copy rows to the clipboard for pasting into Google Sheets; falls back to a selected textarea if blocked
+async function copyRows(rows, msg, box) {
+  const clean = v => String(v ?? '').replace(/[\t\r\n]+/g, ' ');
+  const tsv = rows.map(r => r.map(clean).join('\t')).join('\n');
+  // An HTML table pastes into Google Sheets as proper cells too
+  const html = '<table>' + rows.map(r => '<tr>' + r.map(v => `<td>${esc(v)}</td>`).join('') + '</tr>').join('') + '</table>';
+  box.hidden = true;
+  let ok = false;
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await within(navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([tsv], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]));
+      ok = true;
+    }
+  } catch (e) { }
+  if (!ok) try { await within(navigator.clipboard.writeText(tsv)); ok = true; } catch (e) { }
+  if (!ok) try {
+    const ta = document.createElement('textarea');
+    ta.value = tsv; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    ok = document.execCommand('copy');
+    ta.remove();
+  } catch (e) { }
+  if (ok) { msg.textContent = `✓ ${rows.length - 1}行コピーしました。Googleシートで A1 を選んで ⌘V`; return; }
+  // The browser blocked clipboard access (e.g. VS Code preview): show the data selected for a manual ⌘C
+  box.hidden = false; box.value = tsv; box.focus(); box.select();
+  msg.textContent = 'ブラウザがコピーをブロックしました。下の枠が選択された状態なので ⌘C を押してください。';
+}
+function downloadInstCsv() {
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [INST_HEADER, ...instRows()].map(r => r.map(q).join(','));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `肉専用指示書_${instDate}.csv`;
+  a.click();
+}
+function renderInstPrint() {
+  const rows = instRows();
+  let h = `<h1>肉専用指示書　${esc(instTabName())}<span>${esc($('fileinfo').textContent)}</span></h1>
+  <table class="cal inst"><colgroup><col style="width:9%"><col style="width:9%"><col style="width:27%"><col style="width:7%"><col style="width:6%"><col style="width:8%"><col style="width:10%"><col style="width:7%"><col></colgroup><tr>${INST_HEADER.slice(2).map(c => `<th>${c}</th>`).join('')}</tr>`;
+  for (const r of rows) h += `<tr>${r.slice(2).map((v, k) => `<td>${esc(typeof v === 'number' && k !== 1 ? fmt(v) : v)}</td>`).join('')}</tr>`;
+  $('printview').innerHTML = h + '</table>';
+  $('printview').style.setProperty('--fs', '12px');
+}
+
+// ---- 作業場所別: one section (one printed page) per 作業場所 ----
+const DEPT_UNKNOWN = '作業場所 未確認（Excelで修正）';
+
+function deptGroups() {
+  const cats = new Set([...$('cats').querySelectorAll('input:checked')].map(i => i.value));
+  const ps = selectedPlaces(), z = $('showZero').checked;
+  const f = $('from').value, t = $('to').value;
+  const items = parsed.items.filter(it => it.date >= f && it.date <= t && cats.has(it.cat) && placeOk(it, ps) && (z || it.plan !== 0))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+  // A product with several 作業場所 appears under each of them; anything not matching the list goes to 未確認
+  const groups = PLACES.map(p => ({ place: p, items: items.filter(it => it.places.includes(p)) }));
+  groups.push({ place: DEPT_UNKNOWN, items: items.filter(it => it.placeBad) });
+  return groups.filter(g => g.items.length);
+}
+const md = key => { const [y, m, d] = key.split('-').map(Number); return `${m}/${d}（${WD[new Date(y, m - 1, d).getDay()]}）`; };
+const others = (it, place) => it.places.filter(p => p !== place).join('、');
+
+function renderDept() {
+  if (!parsed.hasPlace) return `<div class="empty">このシートには「作業場所」（製造場所）列がありません。</div>`;
+  const groups = deptGroups(), multi = $('from').value !== $('to').value;
+  let h = `<div class="panel noprint"><div class="row">
+    <button id="deptPrint">印刷（作業場所ごとにカレンダー1ページ）</button></div>
+    <p class="note" style="margin:10px 0 0">期間は上の開始日・終了日（${md($('from').value)}〜${md($('to').value)}）。${groups.filter(g => g.place !== DEPT_UNKNOWN).length}か所。複数の作業場所がある品目は、それぞれのページに［他の作業場所］付きで載ります。分類・作業場所の検索・「0も表示」の設定が反映されます。</p></div>`;
+  if (!groups.length) return h + `<div class="empty">この期間の予定はありません</div>`;
+  for (const g of groups) {
+    const unk = g.place === DEPT_UNKNOWN;
+    h += `<div class="day"><h2 style="${unk ? 'color:var(--zero)' : ''}">${esc(g.place)}<span>${g.items.filter(i => i.plan !== 0).length}件</span></h2><table><tr>${multi ? '<th>日付</th>' : ''}<th class="cat">分類</th><th class="code">コード</th><th>品目名</th><th class="num">計画</th><th class="num">数量</th><th>${unk ? '入力された作業場所' : '他の作業場所'}</th><th>備考</th></tr>`;
+    for (const i of g.items) h += `<tr class="${i.plan === 0 ? 'zero' : ''}">${multi ? `<td>${md(i.date)}</td>` : ''}<td class="cat">${esc(i.cat)}</td><td class="code">${esc(i.code)}</td><td class="name">${esc(i.name)}</td><td class="num">${fmt(i.plan)}${esc(i.planUnit)}</td><td class="num">${fmt(i.qty)} ${esc(i.unit)}</td><td class="place">${unk ? `<span class="bad">${esc(i.placeRaw) || '（空欄）'}</span>` : esc(others(i, g.place))}</td><td class="note">${esc(i.note)}</td></tr>`;
+    h += `</table></div>`;
+  }
+  return h;
+}
+
+function renderDeptPrint() {
+  if (!parsed.hasPlace) { $('printview').innerHTML = ''; return; }
+  const f = $('from').value, t = $('to').value, file = $('fileinfo').textContent;
+  $('printview').innerHTML = deptGroups().map(g =>
+    calendarPage(g.items, f, t, g.place, `${g.items.filter(i => i.plan !== 0).length}件　｜　${file}`, g.place)).join('')
+    || '<h1>この期間の予定はありません</h1>';
+  fitPrint();
+}
+
+// ---- Excel export (editable tables) ----
+const toDate = key => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); };
+function saveXlsx(sheets, filename) {
+  const book = XLSX.utils.book_new();
+  for (const { name, rows, widths } of sheets) {
+    const ws = XLSX.utils.aoa_to_sheet(rows, { cellDates: true, dateNF: 'm/d' });
+    if (widths) ws['!cols'] = widths.map(wch => ({ wch }));
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(rows.length - 1, 0), c: rows[0].length - 1 } }) };
+    XLSX.utils.book_append_sheet(book, ws, name);
+  }
+  XLSX.writeFile(book, filename);
+}
+
+function exportEmXlsx() {
+  const f = $('from').value, t = $('to').value, days = emDays();
+  const txt = it => `${it.name} ${it.plan}${it.planUnit}${it.qty !== null && it.unit !== it.planUnit ? `（${it.qty}${it.unit}）` : ''}${it.note ? ` ※${it.note}` : ''}`;
+  const zero = (d, slot) => d.zero.filter(it => emSlotOf(it) === slot).map(it => `【中止】${it.name}`);
+  const grid = [['日付', '曜日', ...EM_COLS.map(c => c[1])]];
+  for (const d of days) {
+    grid.push([toDate(d.key), WD[toDate(d.key).getDay()],
+      [...d.slot1.map(txt), ...zero(d, 'メイン')].join('／'),
+      [...d.slot2.map(it => (emSlotOf(it) === 'メイン' ? '【メイン②】' : '') + txt(it)), ...d.over.map(it => '【超過】' + txt(it)), ...zero(d, 'サブ')].join('／'),
+      ...EM_FREE.map(s => [...d.free[s].map(txt), ...zero(d, s)].join('／'))]);
+  }
+  const detail = [['日付', '曜日', '枠', 'コード', '品目名', '計画', '計画単位', '数量', '単位', '備考']];
+  for (const d of days) {
+    const label = it => it.plan === 0 ? '中止' : d.slot1.includes(it) ? 'メイン冷凍' : d.slot2.includes(it) ? (emSlotOf(it) === 'メイン' ? 'メイン冷凍②' : 'サブ冷凍') : EM_FREE.includes(emSlotOf(it)) && !d.over.includes(it) ? emSlotOf(it) : '超過';
+    for (const it of [...d.slot1, ...d.slot2, ...d.over, ...EM_FREE.flatMap(s => d.free[s]), ...d.zero])
+      detail.push([toDate(d.key), WD[toDate(d.key).getDay()], label(it), it.code, it.name, it.plan, it.planUnit, it.qty ?? '', it.unit, it.note]);
+  }
+  const name = `早朝肉処理計画表_${f}_${t}.xlsx`;
+  // Styled like the printout via ExcelJS (SheetJS community can't write styles); plain sheets if it can't load
+  loadExcelJS().then(() => saveEmStyled(days, detail, name)).catch(() =>
+    saveXlsx([{ name: '計画表', rows: grid, widths: [7, 5, 34, 30, 26, 24, 18, 24, 20] },
+              { name: '明細', rows: detail, widths: [7, 5, 12, 10, 34, 7, 8, 8, 6, 14] }], name));
+}
+
+let excelJsLoading = null;
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve();
+  return excelJsLoading ??= new Promise((ok, ng) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload = ok; s.onerror = () => { excelJsLoading = null; ng(); };
+    document.head.appendChild(s);
+  });
+}
+
+async function saveEmStyled(days, detail, filename) {
+  const argb = hex => 'FF' + hex.replace('#', '').toUpperCase();
+  const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: argb(hex) } });
+  const thin = { style: 'thin', color: { argb: 'FF000000' } }, border = { top: thin, left: thin, bottom: thin, right: thin };
+  const FS = 14, widths = [8, 5.5, ...EM_COLS.map(c => c[3] * 1.5)]; // large print for older readers
+  const book = new ExcelJS.Workbook(), ws = book.addWorksheet('計画表', {
+    views: [{ state: 'frozen', xSplit: 2, ySplit: 3 }],
+    pageSetup: { paperSize: emPaper === 'A3' ? 8 : 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 1, // whole period on one sheet
+      horizontalCentered: true, margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 }, printTitlesRow: '3:3' }
+  });
+  ws.columns = widths.map(width => ({ width }));
+
+  ws.getCell('A1').value = `早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}`;
+  ws.getCell('A1').font = { bold: true, size: 18 };
+  ws.getCell(1, widths.length).value = $('fileinfo').textContent;
+  ws.getCell(1, widths.length).alignment = { horizontal: 'right' };
+  ws.getCell(1, widths.length).font = { size: 11 };
+  const head = ws.getRow(3);
+  head.values = ['日付', '曜日', ...EM_COLS.map(c => c[1])];
+  head.height = 28;
+  head.eachCell((c, i) => {
+    c.fill = fill(i <= 2 ? '#555555' : EM_COLS[i - 3][2]);
+    c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+    c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    c.border = border;
+  });
+
+  // One rich-text run per piece so the 計画 is bold and 中止 lines are struck through, as on the printout
+  const runs = (it, tag) => [
+    ...(tag ? [{ text: tag + ' ', font: { size: FS - 2, color: { argb: 'FF555555' } } }] : []),
+    { text: it.name + ' ', font: { size: FS } },
+    { text: `${fmt(it.plan)}${it.planUnit}`, font: { size: FS + 2, bold: true } },
+    ...(it.qty !== null && it.unit !== it.planUnit ? [{ text: ` (${fmt(it.qty)}${it.unit})`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : []),
+    ...(it.note ? [{ text: ` ${it.note}`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : [])];
+  const zeroRuns = (d, slot) => d.zero.filter(it => emSlotOf(it) === slot).map(it =>
+    [{ text: `${it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }]);
+
+  days.forEach((d, n) => {
+    const dt = toDate(d.key), w = dt.getDay();
+    const cols = {
+      s1: [...d.slot1.map(it => runs(it)), ...zeroRuns(d, 'メイン')],
+      s2: [...d.slot2.map(it => runs(it, emSlotOf(it) === 'メイン' ? 'メイン②' : '')),
+           ...d.over.map(it => [{ text: `⚠超過 ${it.name} ${fmt(it.plan)}${it.planUnit}`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } }]), ...zeroRuns(d, 'サブ')],
+      ...Object.fromEntries(EM_FREE.map(s => [s, [...d.free[s].map(it => runs(it)), ...zeroRuns(d, s)]]))
+    };
+    const row = ws.getRow(4 + n);
+    row.getCell(1).value = `${dt.getMonth() + 1}/${dt.getDate()}`;
+    row.getCell(2).value = WD[w];
+    EM_COLS.forEach(([k], i) => {
+      const lines = cols[k];
+      if (lines.length) row.getCell(3 + i).value = { richText: lines.flatMap((l, j) => j ? [{ text: '\n', font: { size: FS } }, ...l] : l) };
+    });
+    // No fixed row height: Excel auto-fits on open and again whenever someone types an addition into a cell
+    const color = w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000';
+    widths.forEach((_, j) => {
+      const c = row.getCell(j + 1), i = j + 1;
+      c.border = border;
+      if (d.ng) c.fill = fill('#FBE3E3'); else if (n % 2) c.fill = fill('#E8F0F8');
+      c.alignment = i <= 2 ? { horizontal: 'center', vertical: 'middle' } : { vertical: 'top', wrapText: true };
+      // Every cell gets the large font, so anything typed in later is just as readable
+      c.font = i <= 2 ? { bold: true, size: FS, color: { argb: color } } : { size: FS };
+    });
+  });
+  const foot = ws.getRow(4 + days.length);
+  foot.getCell(1).value = `変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。出力日：${new Date().toLocaleDateString('ja-JP')}`;
+  foot.getCell(1).font = { size: 11 };
+
+  const ds = book.addWorksheet('明細', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ds.columns = [7, 5, 12, 10, 34, 7, 8, 8, 6, 14].map(width => ({ width }));
+  detail.forEach(r => ds.addRow(r));
+  ds.getRow(1).font = { bold: true };
+  ds.getColumn(1).numFmt = 'm/d';
+  ds.autoFilter = { from: { row: 1, column: 1 }, to: { row: detail.length, column: detail[0].length } };
+
+  const blob = new Blob([await book.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function exportMxXlsx(items) {
+  const f = $('from').value, t = $('to').value;
+  const days = parsed.dates.filter(d => d.key >= f && d.key <= t);
+  const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+  const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
+  for (const p of prods) {
+    const mine = items.filter(i => i.order === p.order);
+    rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
+      mine.reduce((s, i) => s + (i.plan || 0), 0)]);
+  }
+  saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...days.map(() => 8), 8] }], `計画表_${f}_${t}.xlsx`);
+}
+
+function downloadCSV() {
+  const items = selected();
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [['日付', '曜日', '分類', 'コード', '品目名', parsed.placeLabel, '計画', '計画単位', '数量', '単位', '備考'].join(',')];
+  for (const i of items) lines.push([i.date, WD[new Date(i.y, i.m - 1, i.d).getDay()], i.cat, i.code, i.name, i.placeRaw, i.plan, i.planUnit, i.qty ?? '', i.unit, i.note].map(q).join(','));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ロット予定_${$('from').value}_${$('to').value}.csv`;
+  a.click();
+}
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = e => e.target.files[0] && loadFile(e.target.files[0]);
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
+$('sheet').onchange = e => selectSheet(e.target.value);
+['from', 'to', 'showZero'].forEach(id => $(id).onchange = render);
+$('cats').onchange = render;
+$('placeQ').oninput = render;
+$('csv').onclick = downloadCSV;
+$('print').onclick = () => window.print();
+$('allc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = true); render(); };
+$('defc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = DEFAULT_CATS.some(dc => norm(dc) === norm(i.value))); render(); };
+</script>
+</body>
+</html>
