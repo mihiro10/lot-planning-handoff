@@ -159,6 +159,8 @@ td.place .bad{color:var(--zero)}
 .rules table{border-collapse:collapse;margin:8px 0}
 .rules th,.rules td{border:1px solid var(--line,#ccc);padding:5px 8px;text-align:left;vertical-align:top}
 .rules ul{margin:4px 0 0;padding-left:20px}
+.rules table.zk td,.rules table.zk th{text-align:center;min-width:70px;vertical-align:middle}
+.rules table.zk tr:first-child th{background:var(--alt)}
 .chgl td{font-size:var(--fs,16px);vertical-align:middle;padding:6px 4px}
 .evx tr.ng td{background:#fbe3e3}
 .evwrap{background:#fff;color:#000;border:1px solid var(--line,#ccc);border-radius:8px;padding:8px;overflow-x:auto}
@@ -617,16 +619,21 @@ function emChanges(days) {
   return out;
 }
 
-// How 追加 / キャンセル / 変更 are decided (the comparison follows the same rules) and how to mark them when editing the Excel by hand
-const EM_RULES = `<details class="rules" open><summary>変更・キャンセル・追加のルール</summary>
-  <p>前の版と<b>同じ日・同じ品目</b>どうしで比べます。</p>
-  <table><tr><th>区分</th><th>どういうとき</th><th>Excelでの書き方</th></tr>
-  <tr><td><span class="chg">変更</span></td><td>同じ日の同じ品目で、<b>数量（倍数）が変わった</b>とき<br><small>例：11/2 肉だんご 3倍 → 4倍</small></td><td>数字を直し、前に <b>【変更 3倍→】</b> と書く</td></tr>
-  <tr><td><span class="chg">キャンセル</span></td><td>その日の予定が<b>なくなった</b>とき（在庫表の計画は消さずに <b>0</b> にする）</td><td>消さずに<b>取り消し線</b>を引き、前に <b>【キャンセル】</b> と書く</td></tr>
-  <tr><td><span class="chg">追加</span></td><td>その日に<b>なかった品目が入った</b>とき</td><td>品目と数量を書き、前に <b>【追加】</b> と書く</td></tr></table>
-  <ul><li><b>日をずらすとき</b>は「変更」にしない：元の日＝<b>キャンセル</b>、新しい日＝<b>追加</b>。</li>
-  <li>枠（メイン／サブ）や備考だけが変わったときは、変更にしない。</li>
-  <li>書き直したセルは<b>黄色</b>に塗る。現場の計画表にも同じ書き方で書き込む。</li></ul></details>`;
+// How to enter 変更 / キャンセル / 追加 in the 在庫表 (the rows and column this tool reads); the comparison follows the same rules
+const EM_RULES = `<details class="rules" open><summary>変更・キャンセル・追加のルール（在庫表への入れ方）</summary>
+  <p>在庫表の品目ごとの<b>「計画（倍）」の行</b>と<b>「備考」の行</b>に、その<b>日付の列</b>で入れます。<b>同じ日・同じ品目</b>どうしで比べます。</p>
+  <table><tr><th>区分</th><th>どういうとき</th><th>「計画（倍）」の行</th><th>「備考」の行</th></tr>
+  <tr><td><span class="chg">変更</span></td><td>同じ日の同じ品目で、<b>数量（倍数）が変わった</b></td><td>新しい倍数に<b>書き換える</b></td><td><b>変更</b></td></tr>
+  <tr><td><span class="chg">キャンセル</span></td><td>その日の予定が<b>なくなった</b></td><td><b>0</b> を入れる（<b>消さない</b>）</td><td><b>キャン</b></td></tr>
+  <tr><td><span class="chg">追加</span></td><td>その日に<b>なかった予定が入った</b></td><td>倍数を入れる</td><td><b>追加</b></td></tr></table>
+  <p style="margin:10px 0 4px">例：肉だんご（1kg）</p>
+  <table class="zk"><tr><th>品目名</th><th>行種別</th><th>11/2</th><th>11/4</th><th>11/5</th></tr>
+  <tr><td rowspan="2">肉だんご（1kg）</td><td>備考</td><td>変更</td><td>キャン</td><td>追加</td></tr>
+  <tr><td>計画（倍）</td><td>4 <small>（3から）</small></td><td>0</td><td>3</td></tr></table>
+  <ul><li><b>日をずらすとき</b>は「変更」にしない：元の日＝<b>0＋キャン</b>、新しい日＝<b>倍数＋追加</b>。</li>
+  <li><b>空欄と0は違う</b>：空欄＝もともと予定なし（計画表に出ない）、0＝キャンセル（取り消し線で出る）。</li>
+  <li><b>在庫表にない品目を足すとき</b>：品目の行を作り、<b>「肉処理 製造枠」の列</b>に メイン冷凍／サブ冷凍／餃子／キット／米飯課・宅配／販促／その他 のどれかを入れる（空欄・0だと計画表に出ません）。</li>
+  <li>印刷用のExcelを手で直すときも同じ区分で：<b>【変更 3倍→】</b>・<b>【キャンセル】</b>＋取り消し線・<b>【追加】</b>、直したセルは<b>黄色</b>。</li></ul></details>`;
 
 // The plan of the last export is remembered in this browser and compared against automatically
 const EM_LAST_KEY = 'lotSchedule.emLastExport';
