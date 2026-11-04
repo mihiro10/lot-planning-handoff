@@ -148,6 +148,14 @@ td.place .bad{color:var(--zero)}
 .evx .zz{font-size:.9em}
 .empage h1{font-size:20px!important}.empage h1 span{font-size:12px!important}
 .evfoot{font-size:11px;margin:3px 0 0}
+/* Changes since the previous version: a black tag so it survives black-and-white printing, plus a pale cell */
+.chg{display:inline-block;background:#000;color:#fff;font-weight:bold;font-size:.85em;padding:0 3px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.evx td.hl{background:#fff3b0!important}
+.cx s{color:#555}
+.man:not(:first-child){border-top:1px dashed #888;margin-top:2px;padding-top:1px}
+.chgt{border-collapse:collapse;margin-top:8px;font-size:14px}
+.chgt th,.chgt td{border:1px solid var(--line,#ccc);padding:3px 8px;text-align:left}
+.chgl td{font-size:var(--fs,16px);vertical-align:middle;padding:6px 4px}
 .evx tr.ng td{background:#fbe3e3}
 .evwrap{background:#fff;color:#000;border:1px solid var(--line,#ccc);border-radius:8px;padding:8px;overflow-x:auto}
 .evwrap .evx{min-width:960px}
@@ -481,6 +489,12 @@ function render() {
   } else if (view === 'em') {
     $('em10').onclick = setTenDays;
     $('emPaper').onchange = e => { emPaper = e.target.value; renderEmPrint(); };
+    $('emPrevFile').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { emPrev = await loadEmPrev(f); render(); } catch (err) { $('emPrevMsg').textContent = err.message; }
+    };
+    if ($('emPrevClear')) $('emPrevClear').onclick = () => { emPrev = null; render(); };
+    if ($('emPrintChg')) $('emPrintChg').onclick = () => { emPrint = 'chg'; renderEmPrint(); window.print(); emPrint = 'grid'; renderEmPrint(); };
     $('out').querySelectorAll('.seg button').forEach(b => b.onclick = () => { emLayout = b.dataset.l; render(); });
     $('emDate').onchange = e => { emDate = e.target.value; render(); };
     $('emCopy').onclick = () => copyRows(emDayRows(true), $('emMsg'), $('emFallback'));
@@ -547,15 +561,86 @@ function emDay(key) {
 }
 const emDays = () => parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value).map(d => emDay(d.key));
 const emQty = it => `${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <span class="tag">(${fmt(it.qty)}${esc(it.unit)})</span>` : ''}`;
-const emItem = (it, tag) => `<div>${tag ? `<span class="tag">${tag}</span> ` : ''}${esc(it.name)} <b>${emQty(it)}</b>${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</div>`;
+// ---- 前回のExcel: each export carries a hidden _data sheet; loading it back marks 追加 / キャンセル / 変更
+// against that version and carries over what was typed into the sheet. Same date + item = same plan;
+// a plan moved to another day is キャンセル on the old day and 追加 on the new one.
+let emPrev = null; // { version, exportedAt, from, to, byDate: Map(date → [{key, col, name, plan, planUnit}]), manual: Map('date|col' → text), edited: [] }
+const emKey = (date, it) => `${date}|${it.code || it.name}`;
+const emPlanText = p => `${fmt(p.plan)}${p.planUnit}`;
+const emColOf = it => ({ 'メイン': 's1', 'サブ': 's2' })[emSlotOf(it)] || emSlotOf(it);
+const emCompared = date => emPrev && date >= emPrev.from && date <= emPrev.to;
+function emChangeOf(date, it) {
+  if (!emCompared(date)) return null;
+  const p = (emPrev.byDate.get(date) || []).find(p => p.key === emKey(date, it));
+  if (!p) return { type: '追加' };
+  return p.plan !== it.plan || p.planUnit !== it.planUnit ? { type: '変更', before: emPlanText(p) } : null;
+}
+
+// Each cell as a list of lines, shared by the screen, the printout and the Excel export:
+// { it, tag, over, change } planned item · { it, zero } 0 that was already 0 · { cancel } キャンセル · { manual } carried-over typing
+function emLines(day) {
+  const cols = Object.fromEntries(EM_COLS.map(([k]) => [k, []]));
+  const add = (k, it, extra) => cols[k].push({ it, change: emChangeOf(day.key, it), ...extra });
+  day.slot1.forEach(it => add('s1', it));
+  day.slot2.forEach(it => add('s2', it, { tag: emSlotOf(it) === 'メイン' ? 'メイン②' : '' }));
+  day.over.forEach(it => add('s2', it, { over: true }));
+  EM_FREE.forEach(s => day.free[s].forEach(it => add(s, it)));
+  const live = new Set(day.live.map(it => emKey(day.key, it)));
+  const cancelled = emCompared(day.key) ? (emPrev.byDate.get(day.key) || []).filter(p => !live.has(p.key)) : [];
+  const gone = new Set(cancelled.map(p => p.key));
+  day.zero.forEach(it => { if (!gone.has(emKey(day.key, it))) cols[emColOf(it)].push({ it, zero: true }); });
+  cancelled.forEach(p => (cols[p.col] || cols.s1).push({ cancel: p }));
+  if (emPrev) EM_COLS.forEach(([k]) => { const t = emPrev.manual.get(`${day.key}|${k}`); if (t) cols[k].push({ manual: t }); });
+  return cols;
+}
+const emChgTag = c => c.type === '変更' ? `<span class="chg">変更 ${esc(c.before)}→</span> ` : `<span class="chg">${c.type}</span> `;
+function emLineHtml(l) {
+  if (l.manual) return `<div class="man">${esc(l.manual).replace(/\n/g, '<br>')}</div>`;
+  if (l.cancel) return `<div class="cx"><span class="chg">キャンセル</span> <s>${esc(l.cancel.name)} ${esc(emPlanText(l.cancel))}</s></div>`;
+  if (l.zero) return `<div class="zz">${esc(l.it.name)} 0</div>`;
+  const it = l.it, chg = l.change ? emChgTag(l.change) : '';
+  if (l.over) return `<div class="over">${chg}⚠超過 ${esc(it.name)} ${emQty(it)}</div>`;
+  return `<div>${chg}${l.tag ? `<span class="tag">${l.tag}</span> ` : ''}${esc(it.name)} <b>${emQty(it)}</b>${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</div>`;
+}
+const emHasChange = lines => lines.some(l => l.change || l.cancel);
 function emCells(day) {
-  const zeroIn = slot => day.zero.filter(it => emSlotOf(it) === slot).map(it => `<div class="zz">${esc(it.name)} 0</div>`).join('');
-  return {
-    s1: day.slot1.map(it => emItem(it)).join('') + zeroIn('メイン'),
-    s2: day.slot2.map(it => emItem(it, emSlotOf(it) === 'メイン' ? 'メイン②' : '')).join('') +
-        day.over.map(it => `<div class="over">⚠超過 ${esc(it.name)} ${emQty(it)}</div>`).join('') + zeroIn('サブ'),
-    ...Object.fromEntries(EM_FREE.map(s => [s, day.free[s].map(it => emItem(it)).join('') + zeroIn(s)]))
-  };
+  const cols = emLines(day);
+  return Object.fromEntries(EM_COLS.map(([k]) => [k, cols[k].map(emLineHtml).join('')]));
+}
+// Flat list for the 変更一覧 / 変更連絡
+function emChanges(days) {
+  const out = [];
+  for (const d of days) {
+    const cols = emLines(d);
+    for (const [k, label] of EM_COLS) for (const l of cols[k]) {
+      if (l.cancel) out.push({ date: d.key, type: 'キャンセル', col: label, name: l.cancel.name, before: emPlanText(l.cancel), after: '' });
+      else if (l.change) out.push({ date: d.key, type: l.change.type, col: label, name: l.it.name, before: l.change.before || '', after: emPlanText(l.it) });
+    }
+  }
+  return out;
+}
+
+async function loadEmPrev(file) {
+  const book = XLSX.read(await file.arrayBuffer());
+  const data = book.Sheets._data && XLSX.utils.sheet_to_json(book.Sheets._data, { header: 1, defval: '' });
+  if (!data) throw new Error('このファイルには比較用のデータがありません（このツールで書き出したExcelを選んでください）。');
+  const sheet = book.Sheets['計画表'], prev = { byDate: new Map(), manual: new Map(), edited: [], name: file.name };
+  const cellText = (r, c) => String(sheet?.[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })]?.v ?? '').replace(/\r\n?/g, '\n').trim();
+  for (const r of data) {
+    if (r[0] === 'meta') Object.assign(prev, { version: Number(r[1]) || 1, exportedAt: String(r[2]), from: String(r[3]), to: String(r[4]) });
+    else if (r[0] === 'item') {
+      const [, date, col, code, name, plan, planUnit] = r, key = `${date}|${code || name}`;
+      if (!prev.byDate.has(date)) prev.byDate.set(date, []);
+      prev.byDate.get(date).push({ key, col, name: String(name), plan: Number(plan), planUnit: String(planUnit) });
+    } else if (r[0] === 'gen') {
+      // What the tool wrote vs what the cell holds now: anything after the tool's text was typed in by hand
+      const [, date, col, row, colNo, gen] = r, now = cellText(Number(row), Number(colNo)), g = String(gen).trim();
+      if (now === g) continue;
+      if (now.startsWith(g)) prev.manual.set(`${date}|${col}`, now.slice(g.length).trim());
+      else prev.edited.push({ date: String(date), col: EM_COLS.find(c => c[0] === col)?.[1] || col, text: now });
+    }
+  }
+  return prev;
 }
 // 枠×日付 view: メイン・2枠目・餃子 always, other columns only when the period has any
 const emRows = days => EM_COLS.filter(([k]) => ['s1', 's2', '餃子'].includes(k) || days.some(d => d.all.some(it => emSlotOf(it) === k)));
@@ -574,11 +659,12 @@ function emColWidths(days) {
   return w.map(x => x / tot * 100);
 }
 function emSheet(days, rowH) {
-  const cells = days.map(emCells), pct = rowH ? emColWidths(days) : EM_COLS.map(c => c[3]);
+  const lines = days.map(emLines), pct = rowH ? emColWidths(days) : EM_COLS.map(c => c[3]);
+  const cells = lines.map(c => Object.fromEntries(EM_COLS.map(([k]) => [k, c[k].map(emLineHtml).join('')])));
   return `<table class="ev evx"><colgroup><col style="width:calc(var(--fs,16px) * 3.8)"><col style="width:calc(var(--fs,16px) * 1.9)">${pct.map(p => `<col style="width:${p.toFixed(1)}%">`).join('')}</colgroup>
     <thead><tr><th>日付</th><th>曜日</th>${EM_COLS.map(c => `<th style="background:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>
     ${days.map((d, i) => { const [y, m, dd] = d.key.split('-').map(Number), w = new Date(y, m - 1, dd).getDay(), wc = w === 0 ? 'sun' : w === 6 ? 'sat' : '';
-      return `<tr ${rowH ? `data-h="${rowH}"` : ''} class="${i % 2 ? 'alt' : ''} ${d.ng ? 'ng' : ''}"><td class="dt ${wc}">${m}/${dd}</td><td class="dt ${wc}">${WD[w]}</td>${EM_COLS.map(c => `<td>${cells[i][c[0]]}</td>`).join('')}</tr>`; }).join('')}
+      return `<tr ${rowH ? `data-h="${rowH}"` : ''} class="${i % 2 ? 'alt' : ''} ${d.ng ? 'ng' : ''}"><td class="dt ${wc}">${m}/${dd}</td><td class="dt ${wc}">${WD[w]}</td>${EM_COLS.map(c => `<td class="${emHasChange(lines[i][c[0]]) ? 'hl' : ''}">${cells[i][c[0]]}</td>`).join('')}</tr>`; }).join('')}
     </tbody></table>`;
 }
 
@@ -607,7 +693,20 @@ function renderEm() {
     <button class="ghost" id="emPrintGrid">計画表を印刷</button>
     <label class="f">用紙<select id="emPaper">${Object.keys(EM_PAPER).map(p => `<option ${p === emPaper ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
     <button class="ghost" id="emXlsx">Excelに書き出し</button></div>
+    <div class="row" style="margin-top:10px">
+    <label class="f">前回のExcel（変更チェック・手入力の引き継ぎ）<input type="file" id="emPrevFile" accept=".xlsx"></label>
+    ${emPrev ? `<span class="note"><b>第${emPrev.version}版</b>（${esc(emPrev.exportedAt)} 書き出し）と比較中 → 次の書き出しは<b>第${emPrev.version + 1}版</b></span><button class="ghost" id="emPrevClear">比較をやめる</button>` : '<span class="note">選ぶと、前回の版からの 追加・キャンセル・変更 に印が付き、Excelに書き込んだ内容も引き継がれます。</span>'}
+    <span id="emPrevMsg" class="note" style="color:var(--zero)"></span></div>
     <p class="note" style="margin:10px 0 0">${parsed.hasSlot ? '枠は「肉処理 製造枠」列から（メイン冷凍・サブ冷凍・餃子・キット・米飯課・宅配・販促・その他。空欄/0は対象外）。' : '枠は分類から：冷凍品＝メイン、冷凍(箱)＝サブ、販売用餃子/通販＝餃子（品目名に「餃子」を含むものは分類に関係なく餃子）。'}期間は上の開始日・終了日（${md($('from').value)}〜${md($('to').value)}）。</p></div>`;
+  if (emPrev) {
+    const chg = emChanges(days);
+    h += emPrev.edited.length ? `<details class="alert" open><summary>⚠ 前回のExcelで計画の文字が直接書き換えられたセル（${emPrev.edited.length}件・引き継いでいません）</summary><table><tr><th>日付</th><th>枠</th><th>セルの内容</th></tr>${emPrev.edited.map(e =>
+      `<tr><td>${md(e.date)}</td><td>${esc(e.col)}</td><td>${esc(e.text)}</td></tr>`).join('')}</table><p class="note">計画の数字は在庫表で直してください。</p></details>` : '';
+    h += `<div class="panel noprint"><div class="row"><b>前回（第${emPrev.version}版）からの変更：${chg.length}件</b>
+      ${chg.length ? '<button class="ghost" id="emPrintChg">変更連絡を印刷</button>' : ''}</div>
+      ${chg.length ? `<table class="chgt"><tr><th>日付</th><th>区分</th><th>枠</th><th>品目名</th><th>前回</th><th>今回</th></tr>${chg.map(c =>
+        `<tr><td>${md(c.date)}</td><td><span class="chg">${c.type}</span></td><td>${esc(c.col)}</td><td>${esc(c.name)}</td><td>${esc(c.before)}</td><td><b>${esc(c.after)}</b></td></tr>`).join('')}</table>` : ''}</div>`;
+  }
   if (emLayout === 'sheet') h += `<div class="evwrap">${emSheet(days)}</div>`;
   else {
     h += `<div class="mx em"><table><tr><th class="name">枠</th>${days.map(d => { const [y, m, dd] = d.key.split('-').map(Number), w = new Date(y, m - 1, dd).getDay();
@@ -644,7 +743,17 @@ function renderEmPrint() {
   // Whole period on one sheet; fitPrint picks the largest font that still fits the chosen paper
   const days = emDays(), paper = EM_PAPER[emPaper];
   $('emPageStyle').textContent = `@page empage{size:${emPaper} portrait;margin:7mm} .empage,#printview:has(.empage){width:${paper.w}mm}`;
-  $('printview').innerHTML = `<div class="empage"><h1>早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}<span>${file}</span></h1>
+  if (emPrint === 'chg') {
+    const chg = emChanges(days);
+    $('printview').innerHTML = `<div class="empage"><h1>早朝肉処理 変更連絡　第${emPrev.version + 1}版<span>第${emPrev.version}版からの変更 ${chg.length}件　｜　${new Date().toLocaleDateString('ja-JP')}</span></h1>
+      <table class="ev chgl"><thead><tr><th style="width:14%">日付</th><th style="width:15%">区分</th><th style="width:18%">枠</th><th>品目名</th><th style="width:11%">前回</th><th style="width:11%">今回</th></tr></thead><tbody>
+      ${chg.map(c => `<tr><td>${md(c.date)}</td><td><b>${c.type}</b></td><td>${esc(c.col)}</td><td>${esc(c.name)}</td><td>${esc(c.before)}</td><td><b>${esc(c.after)}</b></td></tr>`).join('')}</tbody></table>
+      <p class="evfoot">手元の計画表に書き込んでください。確認：　　　　　　</p></div>`;
+    fitPrint();
+    return;
+  }
+  const ver = emPrev ? `　第${emPrev.version + 1}版` : '';
+  $('printview').innerHTML = `<div class="empage"><h1>早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}${ver}<span>${file}</span></h1>
     ${emSheet(days, (paper.h - 26) / Math.max(days.length, 1))}
     <p class="evfoot">変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
   fitPrint();
@@ -923,7 +1032,8 @@ async function saveEmStyled(days, detail, filename) {
   });
   ws.columns = widths.map(width => ({ width }));
 
-  ws.getCell('A1').value = `早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}`;
+  const version = emPrev ? emPrev.version + 1 : 1, exportedAt = new Date().toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  ws.getCell('A1').value = `早朝肉処理 計画表　${md($('from').value)}〜${md($('to').value)}　第${version}版`;
   ws.getCell('A1').font = { bold: true, size: 18 };
   ws.getCell(1, widths.length).value = $('fileinfo').textContent;
   ws.getCell(1, widths.length).alignment = { horizontal: 'right' };
@@ -945,38 +1055,61 @@ async function saveEmStyled(days, detail, filename) {
     { text: `${fmt(it.plan)}${it.planUnit}`, font: { size: FS + 2, bold: true } },
     ...(it.qty !== null && it.unit !== it.planUnit ? [{ text: ` (${fmt(it.qty)}${it.unit})`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : []),
     ...(it.note ? [{ text: ` ${it.note}`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : [])];
-  const zeroRuns = (d, slot) => d.zero.filter(it => emSlotOf(it) === slot).map(it =>
-    [{ text: `${it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }]);
+  const chgRun = c => ({ text: c.type === '変更' ? `【変更 ${c.before}→】` : `【${c.type}】`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } });
+  const lineRuns = l => {
+    if (l.manual) return [{ text: l.manual, font: { size: FS } }];
+    if (l.cancel) return [chgRun({ type: 'キャンセル' }), { text: `${l.cancel.name} ${emPlanText(l.cancel)}`, font: { size: FS, strike: true, color: { argb: 'FF555555' } } }];
+    if (l.zero) return [{ text: `${l.it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }];
+    const pre = l.change ? [chgRun(l.change)] : [];
+    if (l.over) return [...pre, { text: `⚠超過 ${l.it.name} ${fmt(l.it.plan)}${l.it.planUnit}`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } }];
+    return [...pre, ...runs(l.it, l.tag)];
+  };
+  const joinLines = ls => ls.flatMap((l, j) => j ? [{ text: '\n', font: { size: FS } }, ...l] : l);
+  // _data: the plan as exported plus what the tool wrote in each cell, read back by loadEmPrev next time
+  const data = [['meta', version, exportedAt, $('from').value, $('to').value, $('fileinfo').textContent]];
 
   days.forEach((d, n) => {
-    const dt = toDate(d.key), w = dt.getDay();
-    const cols = {
-      s1: [...d.slot1.map(it => runs(it)), ...zeroRuns(d, 'メイン')],
-      s2: [...d.slot2.map(it => runs(it, emSlotOf(it) === 'メイン' ? 'メイン②' : '')),
-           ...d.over.map(it => [{ text: `⚠超過 ${it.name} ${fmt(it.plan)}${it.planUnit}`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } }]), ...zeroRuns(d, 'サブ')],
-      ...Object.fromEntries(EM_FREE.map(s => [s, [...d.free[s].map(it => runs(it)), ...zeroRuns(d, s)]]))
-    };
+    const dt = toDate(d.key), w = dt.getDay(), cols = emLines(d);
+    for (const [k] of EM_COLS) for (const l of cols[k]) if (l.it && !l.zero) data.push(['item', d.key, k, l.it.code, l.it.name, l.it.plan, l.it.planUnit]);
     const row = ws.getRow(4 + n);
     row.getCell(1).value = `${dt.getMonth() + 1}/${dt.getDate()}`;
     row.getCell(2).value = WD[w];
     EM_COLS.forEach(([k], i) => {
-      const lines = cols[k];
-      if (lines.length) row.getCell(3 + i).value = { richText: lines.flatMap((l, j) => j ? [{ text: '\n', font: { size: FS } }, ...l] : l) };
+      const gen = cols[k].filter(l => !l.manual).map(lineRuns), typed = cols[k].filter(l => l.manual).map(lineRuns);
+      data.push(['gen', d.key, k, 4 + n, 3 + i, joinLines(gen).map(r => r.text).join('')]);
+      if (gen.length || typed.length) row.getCell(3 + i).value = { richText: joinLines([...gen, ...typed]) };
     });
     // No fixed row height: Excel auto-fits on open and again whenever someone types an addition into a cell
     const color = w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000';
     widths.forEach((_, j) => {
       const c = row.getCell(j + 1), i = j + 1;
       c.border = border;
-      if (d.ng) c.fill = fill('#FBE3E3'); else if (n % 2) c.fill = fill('#E8F0F8');
+      if (i > 2 && emHasChange(cols[EM_COLS[i - 3][0]])) c.fill = fill('#FFF3B0');
+      else if (d.ng) c.fill = fill('#FBE3E3'); else if (n % 2) c.fill = fill('#E8F0F8');
       c.alignment = i <= 2 ? { horizontal: 'center', vertical: 'middle' } : { vertical: 'top', wrapText: true };
       // Every cell gets the large font, so anything typed in later is just as readable
       c.font = i <= 2 ? { bold: true, size: FS, color: { argb: color } } : { size: FS };
     });
   });
   const foot = ws.getRow(4 + days.length);
-  foot.getCell(1).value = `変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。出力日：${new Date().toLocaleDateString('ja-JP')}`;
+  foot.getCell(1).value = `変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。第${version}版　出力：${exportedAt}${emPrev ? `　【 】＝第${emPrev.version}版からの変更` : ''}`;
   foot.getCell(1).font = { size: 11 };
+
+  if (emPrev) {
+    const chg = emChanges(days), cs = book.addWorksheet('変更一覧', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+    cs.columns = [10, 12, 18, 40, 11, 11].map(width => ({ width }));
+    cs.getCell('A1').value = `早朝肉処理 変更連絡　第${emPrev.version}版 → 第${version}版　（${chg.length}件）`;
+    cs.getCell('A1').font = { bold: true, size: 16 };
+    cs.getRow(3).values = ['日付', '区分', '枠', '品目名', '前回', '今回'];
+    cs.getRow(3).eachCell(c => { c.font = { bold: true, size: FS }; c.border = border; c.fill = fill('#DDDDDD'); });
+    chg.forEach((c, j) => {
+      const r = cs.getRow(4 + j);
+      r.values = [md(c.date), c.type, c.col, c.name, c.before, c.after];
+      r.eachCell({ includeEmpty: true }, (cell, i) => { if (i > 6) return; cell.font = { size: FS, bold: i === 2 || i === 6 }; cell.border = border; cell.alignment = { vertical: 'middle', wrapText: true }; });
+    });
+  }
+  const hid = book.addWorksheet('_data', { state: 'veryHidden' });
+  data.forEach(r => hid.addRow(r));
 
   const ds = book.addWorksheet('明細', { views: [{ state: 'frozen', ySplit: 1 }] });
   ds.columns = [7, 5, 12, 10, 34, 7, 8, 8, 6, 14].map(width => ({ width }));
