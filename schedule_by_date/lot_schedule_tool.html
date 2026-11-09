@@ -72,8 +72,8 @@ td.place .bad{color:var(--zero)}
 /* One-page print calendar (A4 landscape). Laid out off-screen so it can be measured, shown only when printing */
 @page{size:A4 landscape;margin:7mm}
 #printview{-webkit-print-color-adjust:exact;print-color-adjust:exact;position:absolute;left:-10000px;top:0;visibility:hidden;width:283mm;color:#000;background:#fff}
-#printview h1{font-size:15px;margin:0 0 3px;display:flex;justify-content:space-between}
-#printview h1 span{font-weight:normal;font-size:11px}
+#printview h1{font-size:15px;margin:0 0 3px;display:flex;justify-content:space-between;gap:12px;white-space:nowrap}
+#printview h1 span{font-weight:normal;font-size:11px;white-space:normal;text-align:right}
 .cal{width:100%;border-collapse:collapse;table-layout:fixed}
 .cal th{font-size:11px;border:1px solid #000;padding:1px;text-align:center;color:#000;background:#eee}
 .cal td{border:1px solid #000;padding:1px 3px;vertical-align:top;font-size:var(--fs,10.5px);line-height:1.2}
@@ -81,11 +81,21 @@ td.place .bad{color:var(--zero)}
 .cal .dn{font-weight:bold;font-size:1.15em}
 .cal .it{border-top:1px dotted #999;overflow:hidden}
 .cal .it .q{float:right;white-space:nowrap;font-weight:bold;margin-left:4px}
+.cal .it .q small{font-weight:normal}
 .cal .it.z{color:#777;text-decoration:line-through}
 .cal .nt{font-size:.85em;color:#444}
+.cal .it .nt{display:block;clear:both}
+.files{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.files .fl{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13px}
+.files .fn{font-weight:bold;word-break:break-all}
+.files .n{color:var(--muted);font-size:12px}
+.files button.x{padding:2px 9px;line-height:1.4}
 .cal.inst td{height:9mm;vertical-align:middle;font-size:12px}
-.mxpage{break-before:page}
+.mxpage{break-before:page;page:mxpage}
 .mxpage:first-child{break-before:auto}
+/* 品目×日付 prints on B4 portrait (JIS B4 257×364mm, the B4 used in Japan; CSS "B4" is the smaller ISO size) */
+@page mxpage{size:257mm 364mm;margin:7mm}
+#printview:has(.mxpage){width:243mm}
 .gp{width:100%;border-collapse:collapse;table-layout:fixed}
 .gp thead{display:table-header-group}
 .gp tr{break-inside:avoid}
@@ -189,17 +199,17 @@ cal th.sat,.cal td.sat .dn{color:#03a}
 <body>
 <main>
 <h1>日別ロット予定</h1>
-<p class="sub">在庫表のExcelをドロップすると、「計画」の行から日別の製造予定を出します。ファイルはこのブラウザ内だけで処理されます。</p>
+<p class="sub">在庫表のExcelをドロップすると、「計画」の行から日別の製造予定を出します。複数のファイルを入れると1つにまとめて表示します。ファイルはこのブラウザ内だけで処理されます。</p>
 
-<div id="drop">Excelファイルをここにドロップ、または <b>クリックして選択</b>
-  <input id="file" type="file" accept=".xlsx,.xlsm,.xls" hidden>
+<div id="drop">Excelファイルをここにドロップ（<b>複数可</b>・あとから追加もできます）、または <b>クリックして選択</b>
+  <input id="file" type="file" accept=".xlsx,.xlsm,.xls" multiple hidden>
   <div id="fileinfo"></div>
 </div>
 <div id="err" class="err"></div>
 
 <div id="controls" class="panel" hidden>
+  <div class="files" id="files"></div>
   <div class="row">
-    <label class="f">シート<select id="sheet"></select></label>
     <label class="f">開始日<input type="date" id="from"></label>
     <label class="f">終了日<input type="date" id="to"></label>
     <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="showZero" checked>0（中止・変更）も表示</label>
@@ -219,6 +229,7 @@ cal th.sat,.cal td.sat .dn{color:#03a}
   </div>
 </div>
 
+<div id="statusAlert"></div>
 <div id="placeAlert"></div>
 <div id="out"></div>
 <div id="printview"></div>
@@ -285,7 +296,7 @@ function loadPlaceList(workbook) {
   return vals.length ? vals : DEFAULT_PLACES;
 }
 const $ = id => document.getElementById(id);
-let wb = null, parsed = null, view = 'day';
+let parsed = null, view = 'day';
 
 // Normalise full-width parens/spaces so "冷凍（箱）" and "冷凍(箱)" match
 const norm = s => String(s ?? '').replace(/（/g, '(').replace(/）/g, ')').replace(/\s+/g, '').trim();
@@ -320,6 +331,7 @@ function parseSheet(ws) {
   C.place = col('作業場所') >= 0 ? col('作業場所') : col('製造場所'); // older files still say 製造場所
   const placeLabel = C.place >= 0 ? norm(hdr[C.place]) : '作業場所';
   C.slot = col('肉処理製造枠');
+  C.status = col('状態'); // 使用中 / 未使用 / 保存中 (A列)
   const firstRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').s.r + 1; // Excel row number of rows[0]
   const dates = [];
   hdr.forEach((v, i) => { if (i > C.type) { const d = toYMD(v); if (d) dates.push({ i, ...d, key: iso(d) }); } });
@@ -335,7 +347,7 @@ function parseSheet(ws) {
     const t = norm(row[C.type]);
     if (t.startsWith('備考')) { // first row of each product block
       cur = { cat: String(row[C.cat] ?? '').trim(), code: row[C.code] ?? '', name: String(row[C.name] ?? '').trim(), lot: num(row[C.lot]), cs: C.cs >= 0 ? num(row[C.cs]) : null, unit: String(row[C.unit] ?? ''), notes: row, plan: null, planUnit: '', qty: null, excelRow: firstRow + r,
-        placeRaw: C.place >= 0 ? String(row[C.place] ?? '').trim() : '', slot: C.slot >= 0 ? norm(row[C.slot]) : '' };
+        status: C.status >= 0 ? norm(row[C.status]) : '', placeRaw: C.place >= 0 ? String(row[C.place] ?? '').trim() : '', slot: C.slot >= 0 ? norm(row[C.slot]) : '' };
       cur.place = C.place >= 0 ? checkPlaces(cur.placeRaw) : { ok: [], bad: [] };
       blocks.push(cur);
     } else if (cur && t.startsWith('計画') && !cur.plan) { cur.plan = row; cur.planUnit = unitOf(t); }
@@ -354,39 +366,114 @@ function parseSheet(ws) {
       // 計画 c/s = 計画 × ロット × CS/コンテナ, unrounded to 2 decimals like the Google sheet (e.g. 1200枚 → 9.23 c/s)
       const cs = b.lot !== null && b.cs > 0 ? Math.round(p * b.lot * b.cs * 100) / 100 : null;
       const note = b.notes[d.i];
-      items.push({ date: d.key, y: d.y, m: d.m, d: d.d, cat: b.cat, code: b.code, name: b.name, plan: p, planUnit: b.planUnit, order, qty: q, cs, unit: b.unit, note: note == null ? '' : String(note), places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot });
+      items.push({ date: d.key, y: d.y, m: d.m, d: d.d, cat: b.cat, code: b.code, name: b.name, plan: p, planUnit: b.planUnit, order, qty: q, cs, unit: b.unit, note: note == null ? '' : String(note), status: b.status, row: b.excelRow, places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot });
     }
   });
   // Every named product block is checked, planned or not, so the planner can fix them all
   const placeIssues = C.place < 0 ? [] : blocks.filter(b => b.name && b.place.bad.length)
     .map(b => ({ row: b.excelRow, code: b.code, name: b.name, raw: b.placeRaw, bad: b.place.bad }));
-  return { items, dates, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0 };
+  // Every product row (planned or not), so 使用中 products can be listed even without a plan. Template rows are skipped.
+  const products = blocks.map((b, order) => ({ order, cat: b.cat, code: b.code, name: b.name, planUnit: b.planUnit, status: b.status, row: b.excelRow,
+    places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot })).filter(b => b.name && !b.name.startsWith('テンプレート'));
+  return { items, dates, products, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0 };
 }
 
-function loadFile(f) {
+// Several workbooks (e.g. 守屋 + 杉田, or last month + this month) are shown as one schedule.
+// Dropping more files adds to the list; a file with the same name replaces the earlier copy.
+let files = []; // [{ name, wb, sheets, sheet }]
+function loadFiles(list) {
+  const fs = [...list].filter(f => /\.xls[xm]?$/i.test(f.name));
+  if (!fs.length) return;
   $('err').textContent = '';
-  $('fileinfo').textContent = '読み込み中… ' + f.name;
-  const fr = new FileReader();
-  fr.onload = e => {
-    try {
-      wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
-      PLACES = loadPlaceList(wb);
-      const good = wb.SheetNames.filter(n => parseSheet(wb.Sheets[n]));
-      if (!good.length) throw new Error('「行種別」列と日付ヘッダーのあるシートが見つかりません。');
-      $('sheet').innerHTML = good.map(n => `<option>${n}</option>`).join('');
-      $('fileinfo').textContent = f.name;
-      selectSheet(good[good.length - 1]);
-      $('controls').hidden = false;
-    } catch (ex) { $('err').textContent = 'エラー: ' + ex.message; $('fileinfo').textContent = ''; }
-  };
-  fr.readAsArrayBuffer(f);
+  $('fileinfo').textContent = '読み込み中… ' + fs.map(f => f.name).join('、');
+  const errs = [];
+  Promise.all(fs.map(f => f.arrayBuffer().then(buf => {
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    PLACES = loadPlaceList(wb);
+    const sheets = wb.SheetNames.filter(n => parseSheet(wb.Sheets[n]));
+    if (!sheets.length) throw new Error('「行種別」列と日付ヘッダーのあるシートが見つかりません。');
+    return { name: f.name, wb, sheets, sheet: sheets[sheets.length - 1] };
+  }).catch(ex => { errs.push(`${f.name}：${ex.message}`); return null; }))).then(loaded => {
+    for (const x of loaded.filter(Boolean)) {
+      const i = files.findIndex(o => o.name === x.name);
+      if (i >= 0) files[i] = x; else files.push(x);
+    }
+    $('err').textContent = errs.length ? 'エラー: ' + errs.join(' ／ ') : '';
+    combine();
+  });
 }
 
-function selectSheet(name) {
-  $('sheet').value = name;
-  parsed = parseSheet(wb.Sheets[name]);
+function combine() {
+  if (!files.length) {
+    parsed = null;
+    ['out', 'placeAlert', 'statusAlert', 'printview', 'files'].forEach(id => $(id).innerHTML = '');
+    $('fileinfo').textContent = '';
+    $('controls').hidden = true;
+    return;
+  }
+  // The first workbook with its own 作業場所リスト sheet sets the list (checkPlaces runs inside parseSheet)
+  PLACES = files.map(f => loadPlaceList(f.wb)).find(p => p !== DEFAULT_PLACES) || DEFAULT_PLACES;
+  const parts = files.map(f => ({ file: f.name, ...parseSheet(f.wb.Sheets[f.sheet]) }));
+  parsed = mergeParsed(parts);
+  $('fileinfo').textContent = files.map(f => f.name).join(' ＋ ');
+  $('files').innerHTML = files.map((f, i) => `<div class="fl"><span class="fn">${esc(f.name)}</span>
+    <select data-i="${i}">${f.sheets.map(n => `<option ${n === f.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    <span class="n">${md(parts[i].dates[0].key)}〜${md(parts[i].dates[parts[i].dates.length - 1].key)}</span>
+    <button class="ghost x" data-i="${i}" title="このファイルを外す">×</button></div>`).join('');
+  $('files').querySelectorAll('select').forEach(s => s.onchange = () => { files[s.dataset.i].sheet = s.value; combine(); });
+  $('files').querySelectorAll('button.x').forEach(b => b.onclick = () => { files.splice(Number(b.dataset.i), 1); combine(); });
+  $('controls').hidden = false;
+  resetFilters();
+}
+
+// One parsed sheet per file → one combined schedule
+function mergeParsed(parts) {
+  // コード and 品目名 together: many rows still carry the template's placeholder コード「code」
+  const keyOf = it => `${it.code}|${it.name}`;
+  // A product found in an earlier file keeps that file's row order, so it stays one row in 品目×日付
+  const orderOf = new Map();
+  parts.forEach((p, fi) => {
+    const local = new Map(); // row order in this sheet → order in the combined view
+    const orderFor = x => {
+      if (!local.has(x.order)) {
+        const k = keyOf(x), known = orderOf.get(k);
+        local.set(x.order, known && known.fi !== fi ? known.order : fi * 1e6 + x.order);
+        if (!known) orderOf.set(k, { fi, order: local.get(x.order) });
+      }
+      return local.get(x.order);
+    };
+    for (const x of [...p.products, ...p.items]) Object.assign(x, { order: orderFor(x), file: p.file, hasSlot: p.hasSlot });
+  });
+  // Same product on the same date in several files (e.g. last month's overflow columns and this month's sheet):
+  // the sheet that starts later wins, and differing plans are listed so the planner can check them
+  const rank = parts.map((_, i) => i).sort((a, b) => parts[a].dates[0].key.localeCompare(parts[b].dates[0].key) || a - b);
+  const cells = new Map(), conflicts = [];
+  const planText = list => list.map(x => fmt(x.plan) + x.planUnit).join('・');
+  for (const fi of rank) for (const it of parts[fi].items) {
+    const ck = `${it.date}|${keyOf(it)}`, c = cells.get(ck);
+    if (!c) cells.set(ck, { fi, items: [it] });
+    else if (c.fi === fi) c.items.push(it);
+    else {
+      if (planText(c.items) !== planText([it])) conflicts.push({ date: it.date, code: it.code, name: it.name, oldFile: parts[c.fi].file, oldPlan: planText(c.items), file: parts[fi].file, plan: planText([it]) });
+      cells.set(ck, { fi, items: [it] });
+    }
+  }
+  // One entry per product; the sheet that starts later has the current 状態
+  const products = [...new Map(rank.flatMap(fi => parts[fi].products).map(b => [b.order, b])).values()];
+  const dates = [...new Map(parts.flatMap(p => p.dates).map(d => [d.key, d])).values()].sort((a, b) => a.key.localeCompare(b.key));
+  const withPlace = parts.find(p => p.hasPlace);
+  return {
+    items: [...cells.values()].flatMap(c => c.items), products, dates, conflicts, multi: parts.length > 1,
+    hasPlace: !!withPlace, placeLabel: withPlace ? withPlace.placeLabel : '作業場所', hasSlot: parts.some(p => p.hasSlot),
+    placeIssues: parts.flatMap(p => p.placeIssues.map(i => ({ ...i, file: p.file }))),
+  };
+}
+
+function resetFilters() {
   const counts = {};
   parsed.items.forEach(it => counts[it.cat] = (counts[it.cat] || 0) + 1);
+  // 分類 of 使用中 products with no plan get a checkbox too (count 0), so their rows can show in 品目×日付
+  parsed.products.forEach(b => { if (b.status === '使用中') counts[b.cat] = counts[b.cat] || 0; });
   const cats = Object.keys(counts).filter(Boolean).sort();
   const isDef = c => DEFAULT_CATS.some(dc => norm(dc) === norm(c));
   const anyDef = cats.some(isDef); // files without the frozen categories (e.g. 肉処理) start with everything ticked
@@ -422,12 +509,16 @@ function placeOk(it, terms) {
 const selectedPlaces = () => String($('placeQ').value || '').split(/[、,，]+/).map(looseKey).filter(Boolean);
 
 function renderPlaceAlert() {
-  const issues = parsed.placeIssues;
-  if (!issues.length) { $('placeAlert').innerHTML = ''; return; }
+  const issues = parsed.placeIssues, cf = parsed.conflicts, F = parsed.multi;
+  let h = cf.length ? `<details class="alert" ${cf.length <= 10 ? 'open' : ''}><summary>⚠ 同じ品目・同じ日の計画が複数のファイルで違います（${cf.length}件）— 開始日が新しいシートの値を使っています</summary>
+    <table><tr><th>日付</th><th>コード</th><th>品目名</th><th>使わなかった値</th><th>使った値</th></tr>
+    ${cf.map(c => `<tr><td>${md(c.date)}</td><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.oldPlan)}<br><span class="note">${esc(c.oldFile)}</span></td><td><b>${esc(c.plan)}</b><br><span class="note">${esc(c.file)}</span></td></tr>`).join('')}
+    </table></details>` : '';
+  if (!issues.length) { $('placeAlert').innerHTML = h; return; }
   const L = esc(parsed.placeLabel);
-  $('placeAlert').innerHTML = `<details class="alert" ${issues.length <= 10 ? 'open' : ''}><summary>⚠ ${L}が一覧と一致しません（${issues.length}品目）— Excelで修正してください</summary>
-    <table><tr><th>行</th><th>コード</th><th>品目名</th><th>入力</th><th>一致しない部分</th><th>もしかして</th></tr>
-    ${issues.map(i => `<tr><td>${i.row}</td><td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.raw) || '（空欄）'}</td>
+  $('placeAlert').innerHTML = h + `<details class="alert" ${issues.length <= 10 ? 'open' : ''}><summary>⚠ ${L}が一覧と一致しません（${issues.length}品目）— Excelで修正してください</summary>
+    <table><tr>${F ? '<th>ファイル</th>' : ''}<th>行</th><th>コード</th><th>品目名</th><th>入力</th><th>一致しない部分</th><th>もしかして</th></tr>
+    ${issues.map(i => `<tr>${F ? `<td>${esc(i.file)}</td>` : ''}<td>${i.row}</td><td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.raw) || '（空欄）'}</td>
       <td>${i.bad.map(b => `<span class="bad">${esc(b.text)}</span>`).join('<br>')}</td>
       <td>${i.bad.map(b => b.sug ? `<span class="sug">${esc(b.sug)}</span>` : '—').join('<br>')}</td></tr>`).join('')}
     </table><p class="note">一覧と完全に一致する名前だけが有効です（全角/半角・スペース・①も区別）。複数の場合は「、」で区切ってください。（検索は「含む」なので、修正前でも表示されます）</p></details>`;
@@ -446,6 +537,7 @@ const fmt = n => n === null ? '' : n.toLocaleString('ja-JP');
 
 function render() {
   if (!parsed) return;
+  renderStatusAlert();
   const items = selected();
   const live = items.filter(i => i.plan !== 0);
   const days = parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value);
@@ -474,8 +566,8 @@ function render() {
       <button class="ghost" id="mxPrint">印刷</button>
       <button class="ghost" id="mxXlsx">Excelに書き出し</button>
       ${parsed.hasPlace ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mxSplit" ${mxSplit ? 'checked' : ''}>${esc(parsed.placeLabel)}ごとにページを分ける</label>` : ''}
-      </div><p class="note" style="margin:10px 0 0">計画の数字を表示します。印刷は空欄も大きめのマスなので、変更があれば○や数字を書き込めます。</p></div>`;
-    const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+      </div><p class="note" style="margin:10px 0 0">計画の数字を表示します。状態が「使用中」の品目は計画がなくても行を出します。印刷は空欄も大きめのマスなので、変更があれば○や数字を書き込めます。</p></div>`;
+    const prods = mxProducts(items);
     html += `<div class="mx"><table><tr><th class="name">品目名</th><th>単位</th>${days.map((d, n) => { const wd = new Date(d.y, d.m - 1, d.d).getDay(); return `<th class="${wd === 0 || wd === 6 ? 'we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[wd]}</th>`; }).join('')}<th>合計</th></tr>`;
     for (const p of prods) {
       const mine = items.filter(i => i.order === p.order);
@@ -539,7 +631,7 @@ let emDate = null, emPrint = 'grid', emLayout = 'sheet';
 // Anything named 餃子 is the 餃子 slot whatever its 分類 (e.g. ちくやの浜松餃子 is filed under 冷凍(箱))
 const EM_GYOZA_NAME = /餃子/;
 const emSlotOf = it => {
-  if (parsed.hasSlot) return EM_FRAME[it.slot] || null;
+  if (it.hasSlot) return EM_FRAME[it.slot] || null; // per file: one may have the 製造枠 column and another not
   const k = Object.keys(EM_SLOTS).find(c => norm(c) === norm(it.cat));
   if (!k) return null;
   return EM_GYOZA_NAME.test(it.name) ? '餃子' : EM_SLOTS[k];
@@ -771,12 +863,25 @@ function renderEmPrint() {
   fitPrint();
 }
 
-function gridPage(items, title, sub) {
-  const f = $('from').value, t = $('to').value;
-  const days = parsed.dates.filter(d => d.key >= f && d.key <= t);
-  const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+// Printed on B4 縦 (JIS). Long periods are split into pages of at most MX_DAYS_PER_PAGE days so the
+// date columns stay wide enough to write in; each page's 合計 is for its own days.
+const MX_DAYS_PER_PAGE = 16; // B4 width: 16 days ≈ 10mm per date column
+function gridPage(items, title, sub, place) {
+  const all = parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value);
+  const pages = Math.max(1, Math.ceil(all.length / MX_DAYS_PER_PAGE)), per = Math.ceil(all.length / pages) || 1;
+  // Every page lists the same products (planned in the period, plus every 使用中 one), so rows line up and there is room to write in
+  const prods = mxProducts(items, place);
+  let h = '';
+  for (let p = 0; p < pages; p++) {
+    const days = all.slice(p * per, (p + 1) * per);
+    if (days.length) h += gridPagePart(items.filter(i => i.date >= days[0].key && i.date <= days[days.length - 1].key), prods, days, title, pages > 1 ? `${p + 1}/${pages}枚目　｜　${sub}` : sub);
+  }
+  return h || gridPagePart([], prods, all, title, sub);
+}
+function gridPagePart(items, prods, days, title, sub) {
+  const f = days.length ? days[0].key : $('from').value, t = days.length ? days[days.length - 1].key : $('to').value;
   const wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
-  const head = `<tr><th style="width:${days.length > 14 ? 44 : 62}mm">品目名</th><th style="width:11mm">単位</th>${days.map((d, n) => {
+  const head = `<tr><th style="width:${days.length > 12 ? 52 : 66}mm">品目名</th><th style="width:11mm">単位</th>${days.map((d, n) => {
     const w = wdOf(d); return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[w]}</th>`; }).join('')}<th style="width:14mm">合計</th></tr>`;
   const rows = prods.map(p => {
     const mine = items.filter(i => i.order === p.order);
@@ -790,10 +895,38 @@ function gridPage(items, title, sub) {
     <table class="gp"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${days.length + 3}">予定なし</td></tr>`}</tbody></table>
     <p style="font-size:9px;margin:3px 0 0">変更があれば数字を○で囲むか、新しい数字を書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
 }
+// 品目×日付 rows: products planned in the period, plus every 使用中 product that passes the 分類 / 作業場所 filters,
+// even with no plan (blank row to write in). `place` limits the list to one 作業場所 page.
+const ACTIVE = '使用中', INACTIVE = ['未使用', '保存中']; // a plan on an INACTIVE product raises the alert
+function mxProducts(items, place) {
+  const cats = new Set([...$('cats').querySelectorAll('input:checked')].map(i => i.value)), ps = selectedPlaces();
+  const inPlace = b => !place || (place === DEPT_UNKNOWN ? b.placeBad : b.places.includes(place));
+  const m = new Map(items.map(i => [i.order, i]));
+  for (const b of parsed.products) if (b.status === ACTIVE && !m.has(b.order) && cats.has(b.cat) && placeOk(b, ps) && inPlace(b)) m.set(b.order, b);
+  return [...m.values()].sort((a, b) => a.order - b.order);
+}
+
+// 状態 = 未使用 / 保存中 but planned (not 0) within the period: listed whatever the 分類 / 作業場所 filters, so nothing hides it
+function renderStatusAlert() {
+  const f = $('from').value, t = $('to').value, by = new Map();
+  for (const it of parsed.items) if (INACTIVE.includes(it.status) && it.plan !== 0 && it.date >= f && it.date <= t) {
+    if (!by.has(it.order)) by.set(it.order, { it, dates: [] });
+    by.get(it.order).dates.push(`${md(it.date)} ${fmt(it.plan)}${it.planUnit}`);
+  }
+  const list = [...by.values()].sort((a, b) => a.it.order - b.it.order), F = parsed.multi;
+  $('statusAlert').innerHTML = list.length ? `<details class="alert" open><summary>⚠ 状態が「未使用」「保存中」なのに計画がある品目（${list.length}品目、${md(f)}〜${md(t)}）— Excelで状態を「使用中」にするか、計画を消してください</summary>
+    <table><tr>${F ? '<th>ファイル</th>' : ''}<th>行</th><th>状態</th><th>コード</th><th>品目名</th><th>計画のある日</th></tr>
+    ${list.map(({ it, dates }) => `<tr>${F ? `<td>${esc(it.file)}</td>` : ''}<td>${it.row}</td><td class="bad">${esc(it.status)}</td><td>${esc(it.code)}</td><td>${esc(it.name)}</td><td>${dates.map(esc).join('、')}</td></tr>`).join('')}
+    </table></details>` : '';
+}
+
 function renderMxPrint(items) {
   const file = $('fileinfo').textContent;
   if (mxSplit && parsed.hasPlace) {
-    $('printview').innerHTML = deptGroups().map(g => gridPage(g.items, `計画表　${g.place}`, file)).join('') || '<h1>この期間の予定はありません</h1>';
+    // Every 作業場所 with a plan or a 使用中 product gets its own page(s)
+    const groups = new Map(deptGroups().map(g => [g.place, g.items]));
+    $('printview').innerHTML = [...PLACES, DEPT_UNKNOWN].map(pl => { const its = groups.get(pl) || [];
+      return mxProducts(its, pl).length ? gridPage(its, `計画表　${pl}`, file, pl) : ''; }).join('') || '<h1>この期間の予定はありません</h1>';
   } else {
     const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
     $('printview').innerHTML = gridPage(items, '計画表', `${cats}　｜　${file}`);
@@ -818,7 +951,8 @@ function calendarPage(items, f, t, title, sub, place) {
       h += `<td class="${cls}"><div class="dn">${d.getMonth() + 1}/${d.getDate()}</div>` +
         list.map(it => {
           const oth = place && place !== DEPT_UNKNOWN ? others(it, place) : place === DEPT_UNKNOWN ? (it.placeRaw || '空欄') : '';
-          return `<div class="it ${it.plan === 0 ? 'z' : ''}"><span class="q">${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` → ${fmt(it.qty)}${esc(it.unit)}` : ''}</span>${esc(it.name)}${oth ? ` <span class="oth">[${esc(oth)}]</span>` : ''}${it.note ? ` <span class="nt">${esc(it.note)}</span>` : ''}</div>`;
+          // Name, lot (計画 and 計画×ロット), and that day's 備考 on its own line
+          return `<div class="it ${it.plan === 0 ? 'z' : ''}"><span class="q">${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <small>(${fmt(it.qty)}${esc(it.unit)})</small>` : ''}</span>${esc(it.name)}${oth ? ` <span class="oth">[${esc(oth)}]</span>` : ''}${it.note ? `<span class="nt">※${esc(it.note)}</span>` : ''}</div>`;
         }).join('') +
         '</td>';
     }
@@ -827,27 +961,54 @@ function calendarPage(items, f, t, title, sub, place) {
   return h + '</table></div>';
 }
 
-function renderPrint(items) {
-  const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
-  $('printview').innerHTML = calendarPage(items, $('from').value, $('to').value, 'ロット予定', `${cats}　｜　${$('fileinfo').textContent}`);
-  fitPrint();
+// The calendar for f..t, appended to #printview. If the busiest days don't fit one page at CAL_MIN_FS,
+// the weeks are split over more pages (2 pages, 3 pages… down to one week per page) so every plan is printed.
+const CAL_MIN_FS = 8;
+function appendCalendar(items, f, t, title, sub, place) {
+  const [fy, fm, fd] = f.split('-').map(Number), [ty, tm, td] = t.split('-').map(Number);
+  const sun = new Date(fy, fm - 1, fd); sun.setDate(sun.getDate() - sun.getDay());
+  const nWeeks = Math.ceil(((new Date(ty, tm - 1, td) - sun) / 864e5 + 1) / 7);
+  const box = document.createElement('div');
+  $('printview').appendChild(box);
+  for (let n = 1; n <= nWeeks; n++) {
+    const per = Math.ceil(nWeeks / n), pages = Math.ceil(nWeeks / per);
+    let html = '';
+    for (let p = 0; p < pages; p++) {
+      const a = new Date(sun); a.setDate(a.getDate() + p * per * 7);
+      const b = new Date(a); b.setDate(b.getDate() + per * 7 - 1);
+      const from = ymd(a) < f ? f : ymd(a), to = ymd(b) > t ? t : ymd(b);
+      html += calendarPage(items, from, to, title, pages > 1 ? `${p + 1}/${pages}枚目　｜　${sub}` : sub, place);
+    }
+    box.innerHTML = html;
+    const all = [...box.querySelectorAll('.calpage')];
+    if (all.every(pg => fitPage(pg, CAL_MIN_FS))) return;
+    if (n === nWeeks) all.forEach(pg => fitPage(pg)); // one week per page and still crowded: go below CAL_MIN_FS
+  }
 }
 
-// Step the font size down until each calendar page fits one A4 landscape page
+function renderPrint(items) {
+  const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
+  $('printview').innerHTML = '';
+  appendCalendar(items, $('from').value, $('to').value, 'ロット予定', `${cats}　｜　${$('fileinfo').textContent}`);
+}
+
+// Step the font size down until the page fits one A4 landscape page (計画表: the chosen paper); false if not even at minFs
 const PAGE_H_MM = 210 - 14;
-function fitPrint() {
-  for (const page of $('printview').querySelectorAll('.calpage, .empage')) {
-    const em = page.classList.contains('empage'), H = em ? EM_PAPER[emPaper].h : PAGE_H_MM;
-    const trs = [...page.querySelectorAll('tr[data-h]')];
-    // Prefer equal-height weeks; if that doesn't fit, let busy weeks grow (min 12mm) so the text can stay larger
-    fit: for (let fs = em ? 24 : 10.5; fs >= 5; fs -= 0.5) {
-      page.style.setProperty('--fs', fs + 'px');
-      for (const even of [true, false]) {
-        trs.forEach(tr => tr.style.height = even ? tr.dataset.h + 'mm' : (em ? '6mm' : '12mm'));
-        if (page.scrollHeight / (96 / 25.4) <= H - 2) break fit;
-      }
+function fitPage(page, minFs = 5) {
+  const em = page.classList.contains('empage'), H = em ? EM_PAPER[emPaper].h : PAGE_H_MM;
+  const trs = [...page.querySelectorAll('tr[data-h]')];
+  // Prefer equal-height weeks; if that doesn't fit, let busy weeks grow (min 12mm) so the text can stay larger
+  for (let fs = em ? 24 : 10.5; fs >= minFs; fs -= 0.5) {
+    page.style.setProperty('--fs', fs + 'px');
+    for (const even of [true, false]) {
+      trs.forEach(tr => tr.style.height = even ? tr.dataset.h + 'mm' : (em ? '6mm' : '12mm'));
+      if (page.scrollHeight / (96 / 25.4) <= H - 2) return true;
     }
   }
+  return false;
+}
+function fitPrint() {
+  for (const page of $('printview').querySelectorAll('.calpage, .empage')) fitPage(page);
 }
 window.addEventListener('beforeprint', () => { if (view !== 'inst' && !(view === 'em' && emPrint === 'day')) fitPrint(); });
 
@@ -978,10 +1139,9 @@ function renderDept() {
 function renderDeptPrint() {
   if (!parsed.hasPlace) { $('printview').innerHTML = ''; return; }
   const f = $('from').value, t = $('to').value, file = $('fileinfo').textContent;
-  $('printview').innerHTML = deptGroups().map(g =>
-    calendarPage(g.items, f, t, g.place, `${g.items.filter(i => i.plan !== 0).length}件　｜　${file}`, g.place)).join('')
-    || '<h1>この期間の予定はありません</h1>';
-  fitPrint();
+  const groups = deptGroups();
+  $('printview').innerHTML = groups.length ? '' : '<h1>この期間の予定はありません</h1>';
+  for (const g of groups) appendCalendar(g.items, f, t, g.place, `${g.items.filter(i => i.plan !== 0).length}件　｜　${file}`, g.place);
 }
 
 // ---- Excel export (editable tables) ----
@@ -1136,7 +1296,7 @@ async function saveEmStyled(days, detail, filename) {
 function exportMxXlsx(items) {
   const f = $('from').value, t = $('to').value;
   const days = parsed.dates.filter(d => d.key >= f && d.key <= t);
-  const prods = [...new Map(items.map(i => [i.order, i])).values()].sort((a, b) => a.order - b.order);
+  const prods = mxProducts(items);
   const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
   for (const p of prods) {
     const mine = items.filter(i => i.order === p.order);
@@ -1160,11 +1320,10 @@ function downloadCSV() {
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
-$('file').onchange = e => e.target.files[0] && loadFile(e.target.files[0]);
+$('file').onchange = e => { loadFiles(e.target.files); e.target.value = ''; }; // reset so the same file can be picked again
 ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
-$('sheet').onchange = e => selectSheet(e.target.value);
+drop.addEventListener('drop', e => loadFiles(e.dataTransfer.files));
 ['from', 'to', 'showZero'].forEach(id => $(id).onchange = render);
 $('cats').onchange = render;
 $('placeQ').oninput = render;
