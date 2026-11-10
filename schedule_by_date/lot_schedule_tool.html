@@ -104,8 +104,8 @@ td.place .bad{color:var(--zero)}
 .gp th.we{background:#d9d9d9}
 .gp th.sun{color:#b00}.gp th.sat{color:#03a}
 .gp td{height:11mm;font-size:13px;text-align:center;vertical-align:middle}
-.gp td.nm{text-align:left;font-size:11px;line-height:1.2}
-.gp td.nm small{display:block;color:#555;font-size:9px}
+.gp td.nm{text-align:left;font-size:11px;line-height:1.2;font-weight:600}
+.gp td.nm small{display:block;color:#555;font-size:9px;font-weight:normal}
 .gp td.u{font-size:11px}
 .gp td.we{background:#f3f3f3}
 .gp td.alt,.gp th.alt{background:#e3edf8}
@@ -866,27 +866,42 @@ function renderEmPrint() {
 // Printed on B4 縦 (JIS). Long periods are split into pages of at most MX_DAYS_PER_PAGE days so the
 // date columns stay wide enough to write in; each page's 合計 is for its own days.
 const MX_DAYS_PER_PAGE = 16; // B4 width: 16 days ≈ 10mm per date column
-function gridPage(items, title, sub, place) {
+// The 品目×日付 sheet as pages { title, sub, days, prods, items, place }. The print and the Excel export both use this,
+// so they split the same way (one Excel sheet per printed page).
+function mxPages(items, title, sub, place) {
   const all = parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value);
   const pages = Math.max(1, Math.ceil(all.length / MX_DAYS_PER_PAGE)), per = Math.ceil(all.length / pages) || 1;
   // Every page lists the same products (planned in the period, plus every 使用中 one), so rows line up and there is room to write in
-  const prods = mxProducts(items, place);
-  let h = '';
+  const prods = mxProducts(items, place), out = [];
   for (let p = 0; p < pages; p++) {
     const days = all.slice(p * per, (p + 1) * per);
-    if (days.length) h += gridPagePart(items.filter(i => i.date >= days[0].key && i.date <= days[days.length - 1].key), prods, days, title, pages > 1 ? `${p + 1}/${pages}枚目　｜　${sub}` : sub);
+    if (days.length) out.push({ title, sub: pages > 1 ? `${p + 1}/${pages}枚目　｜　${sub}` : sub, days, prods, place,
+      items: items.filter(i => i.date >= days[0].key && i.date <= days[days.length - 1].key) });
   }
-  return h || gridPagePart([], prods, all, title, sub);
+  return out.length ? out : [{ title, sub, days: all, prods, place, items: [] }];
 }
-function gridPagePart(items, prods, days, title, sub) {
-  const f = days.length ? days[0].key : $('from').value, t = days.length ? days[days.length - 1].key : $('to').value;
+// Pages for the current settings: one set, or one set per 作業場所 when 作業場所ごとにページを分ける is on
+function mxAllPages(items) {
+  const file = $('fileinfo').textContent;
+  if (mxSplit && parsed.hasPlace) {
+    // Every 作業場所 with a plan or a 使用中 product gets its own page(s)
+    const groups = new Map(deptGroups().map(g => [g.place, g.items]));
+    return [...PLACES, DEPT_UNKNOWN].flatMap(pl => { const its = groups.get(pl) || [];
+      return mxProducts(its, pl).length ? mxPages(its, `計画表　${pl}`, file, pl) : []; });
+  }
+  const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
+  return mxPages(items, '計画表', `${cats}　｜　${file}`);
+}
+const mxRange = pg => [pg.days.length ? pg.days[0].key : $('from').value, pg.days.length ? pg.days[pg.days.length - 1].key : $('to').value];
+function gridPagePart({ items, prods, days, title, sub }) {
+  const [f, t] = mxRange({ days });
   const wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
   const head = `<tr><th style="width:${days.length > 12 ? 52 : 66}mm">品目名</th><th style="width:11mm">単位</th>${days.map((d, n) => {
     const w = wdOf(d); return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[w]}</th>`; }).join('')}<th style="width:14mm">合計</th></tr>`;
   const rows = prods.map(p => {
     const mine = items.filter(i => i.order === p.order);
     const tot = mine.reduce((s, i) => s + (i.plan || 0), 0);
-    return `<tr><td class="nm">${esc(p.name)}<small>${esc(p.code)}${p.cat ? '　' + esc(p.cat) : ''}</small></td><td class="u">${esc(p.planUnit)}</td>${days.map((d, n) => {
+    return `<tr><td class="nm">${esc(p.name)}</td><td class="u">${esc(p.planUnit)}</td>${days.map((d, n) => {
       const it = mine.find(i => i.date === d.key), w = wdOf(d), we = (w === 0 || w === 6 ? 'we' : '') + (n % 2 ? ' alt' : '');
       return it ? `<td class="${we} ${it.plan === 0 ? 'z' : ''}"><b>${fmt(it.plan)}</b>${it.note ? `<span class="nt">${esc(it.note)}</span>` : ''}</td>` : `<td class="${we}"></td>`;
     }).join('')}<td class="tot">${fmt(tot)}</td></tr>`;
@@ -921,16 +936,7 @@ function renderStatusAlert() {
 }
 
 function renderMxPrint(items) {
-  const file = $('fileinfo').textContent;
-  if (mxSplit && parsed.hasPlace) {
-    // Every 作業場所 with a plan or a 使用中 product gets its own page(s)
-    const groups = new Map(deptGroups().map(g => [g.place, g.items]));
-    $('printview').innerHTML = [...PLACES, DEPT_UNKNOWN].map(pl => { const its = groups.get(pl) || [];
-      return mxProducts(its, pl).length ? gridPage(its, `計画表　${pl}`, file, pl) : ''; }).join('') || '<h1>この期間の予定はありません</h1>';
-  } else {
-    const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
-    $('printview').innerHTML = gridPage(items, '計画表', `${cats}　｜　${file}`);
-  }
+  $('printview').innerHTML = mxAllPages(items).map(gridPagePart).join('') || '<h1>この期間の予定はありません</h1>';
 }
 
 // One calendar page: whole weeks (Sun–Sat) covering f..t. `place` (作業場所別) marks other places sharing the item.
@@ -1293,17 +1299,104 @@ async function saveEmStyled(days, detail, filename) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// 品目×日付 Excel: laid out like the printout (one sheet per printed page, B4 縦, same shading), names in bold
 function exportMxXlsx(items) {
-  const f = $('from').value, t = $('to').value;
-  const days = parsed.dates.filter(d => d.key >= f && d.key <= t);
-  const prods = mxProducts(items);
-  const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
-  for (const p of prods) {
-    const mine = items.filter(i => i.order === p.order);
-    rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
-      mine.reduce((s, i) => s + (i.plan || 0), 0)]);
+  const f = $('from').value, t = $('to').value, filename = `計画表_${f}_${t}.xlsx`, pages = mxAllPages(items);
+  loadExcelJS().then(() => saveMxStyled(pages, filename)).catch(err => {
+    console.error(err); // ExcelJS couldn't load (or failed): plain table instead, so the export still works
+    const days = parsed.dates.filter(d => d.key >= f && d.key <= t), prods = mxProducts(items);
+    const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
+    for (const p of prods) {
+      const mine = items.filter(i => i.order === p.order);
+      rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
+        mine.reduce((s, i) => s + (i.plan || 0), 0)]);
+    }
+    saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...days.map(() => 8), 8] }], filename);
+  });
+}
+
+async function saveMxStyled(pages, filename) {
+  const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex.replace('#', '').toUpperCase() } });
+  const thin = { style: 'thin', color: { argb: 'FF000000' } }, border = { top: thin, left: thin, bottom: thin, right: thin };
+  // Rough text width in Excel column units (full-width characters count double), for row heights
+  const textW = s => [...String(s ?? '')].reduce((w, c) => w + (/[\u0000-ÿ｡-ﾟ]/.test(c) ? 1 : 2), 0);
+  const short = k => { const [, m, d] = k.split('-').map(Number); return `${m}.${d}`; };
+  const book = new ExcelJS.Workbook(), used = new Set(), out = new Date().toLocaleDateString('ja-JP');
+  for (const pg of pages) {
+    const { days, prods, items } = pg, [f, t] = mxRange(pg), wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
+    const NAME_W = days.length > 12 ? 28 : 34, DAY_W = 7, last = days.length + 3;
+    let sn = `${pg.place ? pg.place.replace(/[:\\/?*[\]]/g, '') + ' ' : ''}${short(f)}-${short(t)}`.slice(0, 31);
+    for (let i = 2; used.has(sn); i++) sn = `${sn.slice(0, 27)}(${i})`;
+    used.add(sn);
+    const ws = book.addWorksheet(sn, {
+      views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }],
+      // paperSize 12 = B4 (JIS 257×364mm); one page wide, as many pages tall as the product list needs, header row repeated
+      pageSetup: { paperSize: 12, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+        margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 }, printTitlesRow: '2:2' }
+    });
+    ws.columns = [NAME_W, 6, ...days.map(() => DAY_W), 8].map(width => ({ width }));
+
+    // Row 1: title on the left, file / 分類 on the right (as in the print header)
+    const mid = Math.max(2, Math.ceil(last / 2));
+    ws.mergeCells(1, 1, 1, mid); ws.mergeCells(1, mid + 1, 1, last);
+    Object.assign(ws.getCell(1, 1), { value: `${pg.title}　${md(f)}〜${md(t)}`, font: { bold: true, size: 16 }, alignment: { vertical: 'middle' } });
+    Object.assign(ws.getCell(1, mid + 1), { value: pg.sub, font: { size: 9 }, alignment: { horizontal: 'right', vertical: 'middle', wrapText: true } });
+    ws.getRow(1).height = 30;
+
+    // Row 2: header. Weekend columns darker, every other date tinted, 日 red / 土 blue
+    const head = ws.getRow(2);
+    head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`), '合計'];
+    head.height = 30;
+    for (let c = 1; c <= last; c++) {
+      const cell = head.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
+      cell.fill = fill(alt && we ? '#C8D6E6' : alt ? '#E3EDF8' : we ? '#D9D9D9' : '#EEEEEE');
+      cell.font = { bold: true, size: 10, color: { argb: w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = border;
+    }
+
+    // Product rows: bold 品目名 only, 計画 large and bold, that day's 備考 small under it, 0 struck through
+    prods.forEach((p, r) => {
+      const row = ws.getRow(3 + r), mine = items.filter(i => i.order === p.order);
+      row.getCell(1).value = p.name;
+      row.getCell(1).font = { bold: true, size: 11 };
+      row.getCell(1).alignment = { vertical: 'middle', wrapText: true };
+      row.getCell(2).value = p.planUnit;
+      row.getCell(2).font = { size: 9 };
+      let noteLines = 0;
+      days.forEach((d, n) => {
+        const it = mine.find(i => i.date === d.key), cell = row.getCell(3 + n);
+        if (!it) return;
+        const pf = { bold: true, size: 13, ...(it.plan === 0 ? { strike: true, color: { argb: 'FF777777' } } : {}) };
+        if (it.note) {
+          cell.value = { richText: [{ text: fmt(it.plan), font: pf }, { text: '\n' + it.note, font: { size: 7, color: { argb: 'FF444444' } } }] };
+          noteLines = Math.max(noteLines, Math.ceil(textW(it.note) * 0.65 / (DAY_W - 1)));
+        } else { cell.value = it.plan; cell.font = pf; } // a plain number stays editable as a number
+      });
+      row.getCell(last).value = mine.reduce((s, i) => s + (i.plan || 0), 0);
+      row.getCell(last).font = { size: 10 };
+      for (let c = 1; c <= last; c++) {
+        const cell = row.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
+        if (d && (we || alt)) cell.fill = fill(alt && we ? '#D3DFEC' : alt ? '#E3EDF8' : '#F3F3F3');
+        if (c > 1) cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = border;
+      }
+      // At least 11mm like the print (room to write in); taller for long names or long 備考
+      const nameLines = Math.ceil(textW(p.name) * 1.1 / (NAME_W - 1));
+      row.height = Math.max(31, nameLines * 14 + 6, 20 + noteLines * 10);
+    });
+    if (!prods.length) {
+      ws.mergeCells(3, 1, 3, last);
+      Object.assign(ws.getCell(3, 1), { value: '予定なし', alignment: { horizontal: 'center' } });
+    }
+    const foot = ws.getCell(3 + Math.max(prods.length, 1), 1);
+    foot.value = `変更があれば数字を○で囲むか、新しい数字を書き込んでください。出力日：${out}`;
+    foot.font = { size: 9 };
   }
-  saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...days.map(() => 8), 8] }], `計画表_${f}_${t}.xlsx`);
+  const blob = new Blob([await book.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function downloadCSV() {
