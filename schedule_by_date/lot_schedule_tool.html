@@ -120,7 +120,6 @@ td.place .bad{color:var(--zero)}
 .gp td b{font-size:13pt}
 .gp td.z b{text-decoration:line-through;color:#777}
 .gp td .nt{display:block;font-size:7pt;color:#444;line-height:1.1}
-.gp td.tot{font-size:10pt}
 .mx.em td{white-space:normal}
 .mx.em td.cell{min-width:0!important;width:auto}
 .em td.slot{font-weight:bold;white-space:normal;min-width:90px}
@@ -619,11 +618,10 @@ function render() {
       ${parsed.hasPlace ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mxSplit" ${mxSplit ? 'checked' : ''}>${esc(parsed.placeLabel)}ごとにページを分ける</label>` : ''}
       </div><p class="note" style="margin:10px 0 0">計画の数字を表示します。状態が「使用中」の品目は計画がなくても行を出します。印刷は空欄も大きめのマスなので、変更があれば○や数字を書き込めます。</p></div>`;
     const prods = mxProducts(items);
-    html += `<div class="mx"><table><tr><th class="name">品目名</th><th>単位</th>${days.map((d, n) => { const wd = new Date(d.y, d.m - 1, d.d).getDay(); return `<th class="${wd === 0 || wd === 6 ? 'we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[wd]}</th>`; }).join('')}<th>合計</th></tr>`;
+    html += `<div class="mx"><table><tr><th class="name">品目名</th><th>単位</th>${days.map((d, n) => { const wd = new Date(d.y, d.m - 1, d.d).getDay(); return `<th class="${wd === 0 || wd === 6 ? 'we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[wd]}</th>`; }).join('')}</tr>`;
     for (const p of prods) {
       const mine = items.filter(i => i.order === p.order);
-      const tot = mine.reduce((s, i) => s + (i.plan || 0), 0);
-      html += `<tr><td class="name">${esc(p.name)}</td><td>${esc(p.planUnit)}</td>${days.map((d, n) => { const it = mine.find(i => i.date === d.key), a = n % 2 ? 'alt' : ''; return it ? `<td class="${a} ${it.plan === 0 ? 'z' : ''}" title="${esc(it.note)}">${fmt(it.plan)}</td>` : `<td class="${a}"></td>`; }).join('')}<td><b>${fmt(tot)}</b></td></tr>`;
+      html += `<tr><td class="name">${esc(p.name)}</td><td>${esc(p.planUnit)}</td>${days.map((d, n) => { const it = mine.find(i => i.date === d.key), a = n % 2 ? 'alt' : ''; return it ? `<td class="${a} ${it.plan === 0 ? 'z' : ''}" title="${esc(it.note)}">${fmt(it.plan)}</td>` : `<td class="${a}"></td>`; }).join('')}</tr>`;
     }
     html += `</table></div>`;
   }
@@ -922,7 +920,7 @@ function renderEmPrint() {
 }
 
 // Printed on B4 縦 (JIS). Long periods are split into pages of at most MX_DAYS_PER_PAGE days so the
-// date columns stay wide enough to write in; each page's 合計 is for its own days.
+// date columns stay wide enough to write in.
 const MX_DAYS_PER_PAGE = 11; // ~10 days per B4 sheet, like the floor sample, so Excel prints at 100% (no shrink-to-fit) and the fonts stay at their set size
 // The 品目×日付 sheet as pages { title, sub, days, prods, items, place }. The print and the Excel export both use this,
 // so they split the same way (one Excel sheet per printed page).
@@ -956,17 +954,16 @@ function gridPagePart({ items, prods, days, title, sub }) {
   const [f, t] = mxRange({ days });
   const wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
   const head = `<tr><th style="width:${days.length > 12 ? 52 : 66}mm">品目名</th><th style="width:11mm">単位</th>${days.map((d, n) => {
-    const w = wdOf(d); return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[w]}</th>`; }).join('')}<th style="width:14mm">合計</th></tr>`;
+    const w = wdOf(d); return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''} ${n % 2 ? 'alt' : ''}">${d.m}/${d.d}<br>${WD[w]}</th>`; }).join('')}</tr>`;
   const rows = prods.map(p => {
     const mine = items.filter(i => i.order === p.order);
-    const tot = mine.reduce((s, i) => s + (i.plan || 0), 0);
     return `<tr><td class="nm">${esc(p.name)}</td><td class="u">${esc(p.planUnit)}</td>${days.map((d, n) => {
       const it = mine.find(i => i.date === d.key), w = wdOf(d), we = (w === 0 || w === 6 ? 'we' : '') + (n % 2 ? ' alt' : '');
       return it ? `<td class="${we} ${it.plan === 0 ? 'z' : ''}"><b>${fmt(it.plan)}</b>${it.note ? `<span class="nt">${esc(it.note)}</span>` : ''}</td>` : `<td class="${we}"></td>`;
-    }).join('')}<td class="tot">${fmt(tot)}</td></tr>`;
+    }).join('')}</tr>`;
   }).join('');
   return `<div class="mxpage"><h1>${esc(title)}　${md(f)}〜${md(t)}<span>${esc(sub)}</span></h1>
-    <table class="gp"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${days.length + 3}">予定なし</td></tr>`}</tbody></table>
+    <table class="gp"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${days.length + 2}">予定なし</td></tr>`}</tbody></table>
     <p class="foot">変更があれば数字を○で囲むか、新しい数字を書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
 }
 // 品目×日付 rows: products planned in the period, plus every 使用中 product that passes the 分類 / 作業場所 filters,
@@ -1376,19 +1373,18 @@ function exportMxXlsx(items) {
   const f = $('from').value, t = $('to').value, filename = `計画表_${f}_${t}.xlsx`, pages = mxAllPages(items);
   loadExcelJS().then(() => saveMxStyled(pages, filename)).catch(err => {
     console.error(err); // ExcelJS couldn't load (or failed): plain table instead, so the export still works
-    const rows = mxPlainRows(items), nDays = rows[0].length - 5;
-    saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...Array(nDays).fill(8), 8] }], filename);
+    const rows = mxPlainRows(items), nDays = rows[0].length - 4;
+    saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...Array(nDays).fill(8)] }], filename);
   });
 }
-// 品目×日付 as a plain table: one row per 品目 (same list as the screen), one column per date, then 合計
+// 品目×日付 as a plain table: one row per 品目 (same list as the screen), one column per date
 function mxPlainRows(items) {
   const f = $('from').value, t = $('to').value;
   const days = parsed.dates.filter(d => d.key >= f && d.key <= t), prods = mxProducts(items);
-  const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
+  const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`)]];
   for (const p of prods) {
     const mine = items.filter(i => i.order === p.order);
-    rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
-      mine.reduce((s, i) => s + (i.plan || 0), 0)]);
+    rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; })]);
   }
   return rows;
 }
@@ -1402,7 +1398,7 @@ function downloadRowsCsv(rows, filename) {
 }
 
 // Font sizes follow the floor's 計画表_2026-11-21_2026-11-30.xlsx: title 16, header 10, 品目名 12 bold, 単位 9,
-// 計画 13 bold, 備考 7, 合計 10, footer 9 (pt). The browser print (.gp CSS) uses the same sizes.
+// 計画 13 bold, 備考 7, footer 9 (pt). The browser print (.gp CSS) uses the same sizes.
 const MX_FONT = 'ＭＳ Ｐゴシック';
 async function saveMxStyled(pages, filename) {
   const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex.replace('#', '').toUpperCase() } });
@@ -1413,7 +1409,7 @@ async function saveMxStyled(pages, filename) {
   const book = new ExcelJS.Workbook(), used = new Set(), out = new Date().toLocaleDateString('ja-JP');
   for (const pg of pages) {
     const { days, prods, items } = pg, [f, t] = mxRange(pg), wdOf = d => new Date(d.y, d.m - 1, d.d).getDay();
-    const NAME_W = days.length > 12 ? 28 : 34, DAY_W = 7, last = days.length + 3;
+    const NAME_W = days.length > 12 ? 28 : 34, DAY_W = 7, last = days.length + 2; // last = last date column
     let sn = `${pg.place ? pg.place.replace(/[:\\/?*[\]]/g, '') + ' ' : ''}${short(f)}-${short(t)}`.slice(0, 31);
     for (let i = 2; used.has(sn); i++) sn = `${sn.slice(0, 27)}(${i})`;
     used.add(sn);
@@ -1423,7 +1419,7 @@ async function saveMxStyled(pages, filename) {
       pageSetup: { paperSize: 12, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
         margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 }, printTitlesRow: '2:2' }
     });
-    ws.columns = [NAME_W, 6, ...days.map(() => DAY_W), 8].map(width => ({ width }));
+    ws.columns = [NAME_W, 6, ...days.map(() => DAY_W)].map(width => ({ width }));
 
     // Row 1: title on the left, file / 分類 on the right (as in the print header)
     const mid = Math.max(2, Math.ceil(last / 2));
@@ -1434,7 +1430,7 @@ async function saveMxStyled(pages, filename) {
 
     // Row 2: header. Weekend columns darker, every other date tinted, 日 red / 土 blue
     const head = ws.getRow(2);
-    head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`), '合計'];
+    head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`)];
     head.height = 30;
     for (let c = 1; c <= last; c++) {
       const cell = head.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
@@ -1462,8 +1458,6 @@ async function saveMxStyled(pages, filename) {
           noteLines = Math.max(noteLines, Math.ceil(textW(it.note) * 0.65 / (DAY_W - 1)));
         } else { cell.value = it.plan; cell.font = pf; } // a plain number stays editable as a number
       });
-      row.getCell(last).value = mine.reduce((s, i) => s + (i.plan || 0), 0);
-      row.getCell(last).font = { size: 10 };
       for (let c = 1; c <= last; c++) {
         const cell = row.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
         if (d && (we || alt)) cell.fill = fill(alt && we ? '#D3DFEC' : alt ? '#E3EDF8' : '#F3F3F3');
