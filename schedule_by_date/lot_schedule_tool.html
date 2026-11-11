@@ -185,9 +185,6 @@ td.place .bad{color:var(--zero)}
 .seg button.on{opacity:1;font-weight:bold}
 .calpage{break-before:page}
 .calpage:first-child{break-before:auto}
-.cal .it .oth{font-size:.8em;color:#555}
-.cal.inst td:nth-child(4),.cal.inst td:nth-child(6){text-align:right}
-.cal th.sun,.cal td.sun .dn{color:#b00}.cal th.sat,.cal td.sat .dn{color:#03a}
 #printview>div:first-child>.calpage:first-child{break-before:auto}
 #printview>div+div>.calpage:first-child{break-before:page}
 /* 6-day calendar sheet (日別 / 作業場所別 print), A4 横 */
@@ -208,6 +205,9 @@ td.place .bad{color:var(--zero)}
 .d5 .wa{flex:1;min-height:var(--wa,30mm);border-top:1.5px solid #000;background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(9mm - 1px),#aaa calc(9mm - 1px),#aaa 9mm)}
 .d5 .wa span{display:block;font-size:8pt;color:#666;padding:1px 4px;background:inherit}
 .d5page .foot{font-size:9pt;margin:3px 0 0}
+.cal .it .oth{font-size:.8em;color:#555}
+.cal.inst td:nth-child(4),.cal.inst td:nth-child(6){text-align:right}
+.cal th.sun,.cal td.sun .dn{color:#b00}.cal th.sat,.cal td.sat .dn{color:#03a}
 @media print{
   body{background:#fff}
   main{max-width:none;padding:0}
@@ -1351,6 +1351,9 @@ function exportMxXlsx(items) {
   });
 }
 
+// Font sizes follow the floor's 計画表_2026-11-21_2026-11-30.xlsx: title 16, header 10, 品目名 12 bold, 単位 9,
+// 計画 13 bold, 備考 7, 合計 10, footer 9 (pt). The browser print (.gp CSS) uses the same sizes.
+const MX_FONT = 'ＭＳ Ｐゴシック';
 async function saveMxStyled(pages, filename) {
   const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex.replace('#', '').toUpperCase() } });
   const thin = { style: 'thin', color: { argb: 'FF000000' } }, border = { top: thin, left: thin, bottom: thin, right: thin };
@@ -1381,9 +1384,6 @@ async function saveMxStyled(pages, filename) {
 
     // Row 2: header. Weekend columns darker, every other date tinted, 日 red / 土 blue
     const head = ws.getRow(2);
-// Font sizes follow the floor's 計画表_2026-11-21_2026-11-30.xlsx: title 16, header 10, 品目名 12 bold, 単位 9,
-// 計画 13 bold, 備考 7, 合計 10, footer 9 (pt). The browser print (.gp CSS) uses the same sizes.
-const MX_FONT = 'ＭＳ Ｐゴシック';
     head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`), '合計'];
     head.height = 30;
     for (let c = 1; c <= last; c++) {
@@ -1431,6 +1431,11 @@ const MX_FONT = 'ＭＳ Ｐゴシック';
     const foot = ws.getCell(3 + Math.max(prods.length, 1), 1);
     foot.value = `変更があれば数字を○で囲むか、新しい数字を書き込んでください。出力日：${out}`;
     foot.font = { size: 9 };
+    // Every cell and every rich-text run in ＭＳ Ｐゴシック, the font the floor's copy uses
+    ws.eachRow({ includeEmpty: true }, row => row.eachCell({ includeEmpty: true }, cell => {
+      if (cell.value && cell.value.richText) cell.value = { richText: cell.value.richText.map(r => ({ ...r, font: { ...r.font, name: MX_FONT } })) };
+      cell.font = { ...cell.font, name: MX_FONT };
+    }));
   }
   const blob = new Blob([await book.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
@@ -1461,11 +1466,6 @@ $('cats').onchange = render;
 $('placeQ').oninput = render;
 $('csv').onclick = downloadCSV;
 $('print').onclick = () => window.print();
-    // Every cell and every rich-text run in ＭＳ Ｐゴシック, the font the floor's copy uses
-    ws.eachRow({ includeEmpty: true }, row => row.eachCell({ includeEmpty: true }, cell => {
-      if (cell.value && cell.value.richText) cell.value = { richText: cell.value.richText.map(r => ({ ...r, font: { ...r.font, name: MX_FONT } })) };
-      cell.font = { ...cell.font, name: MX_FONT };
-    }));
 $('allc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = true); render(); };
 $('defc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = DEFAULT_CATS.some(dc => norm(dc) === norm(i.value))); render(); };
 </script>
