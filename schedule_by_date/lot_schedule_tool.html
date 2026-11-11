@@ -56,6 +56,9 @@ tr.zero td.name{text-decoration:line-through}
 .flt{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
 .flt .h{font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
 .flt .h a{color:var(--accent);cursor:pointer}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.presets button{padding:4px 10px;font-size:13px;background:transparent;color:var(--accent)}
+.presets button.on{background:var(--accent);color:#fff}
 td.place{font-size:12px;color:var(--muted)}
 td.place .bad{color:var(--zero)}
 .tabs{display:flex;gap:6px;margin-top:16px}
@@ -243,6 +246,7 @@ cal th.sat,.cal td.sat .dn{color:#03a}
       <input type="search" id="placeQ" list="placeOpts" placeholder="例：肉処理　／　複数は「、」区切り（どれかを含む）" style="font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);width:min(420px,100%)">
     </label>
     <datalist id="placeOpts"></datalist>
+    <div class="presets" id="placePresets"></div>
   </div>
   <div class="row noprint" style="margin-top:14px">
     <button id="csv">CSVダウンロード</button>
@@ -268,6 +272,10 @@ const DEFAULT_PLACES = ['昼間根菜カット', '昼間野菜仕込み', '早�
   '昼間魚処理室', '早朝魚処理室', '昼間厨房①', '早朝厨房', '昼間厨房②', '昼間パッケージ室', '早朝パッケージ室', '昼間仕分室', '早朝仕分室',
   '第2工場', '米飯課', '米飯課　早朝厨房', '米飯課　昼間厨房', '米飯課　早朝パッケージ室', '米飯課　昼間パッケージ室', '早朝米飯厨房'];
 const PLACE_LIST_SHEETS = ['作業場所リスト', '部署リスト', '製造場所リスト'];
+// One-click groups of 作業場所 for the search box (any of them, combined into one 品目×日付 etc.)
+const PLACE_PRESETS = [
+  { label: '昼間4か所（サラダ室・野菜仕込み・根菜カット・厨房①）', places: ['昼間サラダ室', '昼間野菜仕込み', '昼間根菜カット', '昼間厨房①'] },
+];
 // Shorthand seen in existing files → official name. Used ONLY for suggestions; matching itself is exact.
 const PLACE_ALIASES = {
   '早朝肉': '早朝肉処理室', '早肉処理': '早朝肉処理室', '昼肉処理': '昼間肉処理室', '早朝魚': '早朝魚処理室', '昼魚処理': '昼間魚処理室',
@@ -521,6 +529,18 @@ function buildPlaceFilter() {
   // Autocomplete: official names that appear in this file
   const used = new Set(parsed.items.flatMap(it => it.places));
   $('placeOpts').innerHTML = PLACES.filter(p => used.has(p)).map(p => `<option value="${esc(p)}">`).join('');
+  $('placePresets').innerHTML = PLACE_PRESETS.map((g, i) => `<button type="button" class="ghost" data-i="${i}">${esc(g.label)}</button>`).join('')
+    + `<button type="button" class="ghost" data-i="-1">検索をクリア</button>`;
+  $('placePresets').querySelectorAll('button').forEach(b => b.onclick = () => {
+    $('placeQ').value = b.dataset.i < 0 ? '' : PLACE_PRESETS[b.dataset.i].places.join('、');
+    render();
+  });
+  markPreset();
+}
+// Highlight the preset that matches what is in the search box
+function markPreset() {
+  const q = String($('placeQ').value || '').trim();
+  $('placePresets').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.i >= 0 && PLACE_PRESETS[b.dataset.i].places.join('、') === q));
 }
 // Contains-search on the raw cell text (a cell can hold several places). Width/space differences are
 // ignored so typing 肉処理 finds 昼間肉処理室 and also mis-typed cells. Several terms with 「、」 = any of them.
@@ -560,6 +580,7 @@ const fmt = n => n === null ? '' : n.toLocaleString('ja-JP');
 
 function render() {
   if (!parsed) return;
+  markPreset();
   renderStatusAlert();
   const items = selected();
   const live = items.filter(i => i.plan !== 0);
@@ -607,6 +628,8 @@ function render() {
     $('instCsv').onclick = downloadInstCsv;
     $('instPrint').onclick = () => window.print();
     renderInstPrint();
+  } else if (view === 'em' && !$('em10')) {
+    $('printview').innerHTML = ''; // no 早朝 plans in this file: only the message is shown, nothing to print
   } else if (view === 'em') {
     $('em10').onclick = setTenDays;
     $('emPaper').onchange = e => { emPaper = e.target.value; renderEmPrint(); };
@@ -913,7 +936,8 @@ function mxAllPages(items) {
       return mxProducts(its, pl).length ? mxPages(its, `計画表　${pl}`, file, pl) : []; });
   }
   const cats = [...$('cats').querySelectorAll('input:checked')].map(i => i.value).join('・');
-  return mxPages(items, '計画表', `${cats}　｜　${file}`);
+  const q = String($('placeQ').value || '').split(/[、,，]+/).map(x => x.trim()).filter(Boolean).join('・');
+  return mxPages(items, q ? `計画表　${q}` : '計画表', `${cats}　｜　${file}`);
 }
 const mxRange = pg => [pg.days.length ? pg.days[0].key : $('from').value, pg.days.length ? pg.days[pg.days.length - 1].key : $('to').value];
 function gridPagePart({ items, prods, days, title, sub }) {
@@ -1463,7 +1487,7 @@ $('file').onchange = e => { loadFiles(e.target.files); e.target.value = ''; }; /
 drop.addEventListener('drop', e => loadFiles(e.dataTransfer.files));
 ['from', 'to', 'showZero'].forEach(id => $(id).onchange = render);
 $('cats').onchange = render;
-$('placeQ').oninput = render;
+$('placeQ').oninput = () => { markPreset(); render(); };
 $('csv').onclick = downloadCSV;
 $('print').onclick = () => window.print();
 $('allc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = true); render(); };
