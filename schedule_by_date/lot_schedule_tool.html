@@ -99,22 +99,25 @@ td.place .bad{color:var(--zero)}
 .gp{width:100%;border-collapse:collapse;table-layout:fixed}
 .gp thead{display:table-header-group}
 .gp tr{break-inside:avoid}
+/* 品目×日付 print: same pt sizes and font as the Excel export (see MX_FONT) */
+.mxpage{font-family:"MS PGothic","ＭＳ Ｐゴシック","Hiragino Kaku Gothic ProN","Hiragino Sans",sans-serif}
+.mxpage h1{font-size:16pt!important}.mxpage h1 span{font-size:9pt!important}
+.mxpage .foot{font-size:9pt;margin:3px 0 0}
 .gp th,.gp td{border:1px solid #000;padding:1px 3px;color:#000}
-.gp th{font-size:11px;background:#eee;text-align:center;font-weight:bold}
+.gp th{font-size:10pt;background:#eee;text-align:center;font-weight:bold}
 .gp th.we{background:#d9d9d9}
 .gp th.sun{color:#b00}.gp th.sat{color:#03a}
-.gp td{height:11mm;font-size:13px;text-align:center;vertical-align:middle}
-.gp td.nm{text-align:left;font-size:11px;line-height:1.2;font-weight:600}
-.gp td.nm small{display:block;color:#555;font-size:9px;font-weight:normal}
-.gp td.u{font-size:11px}
+.gp td{height:11mm;font-size:13pt;text-align:center;vertical-align:middle}
+.gp td.nm{text-align:left;font-size:12pt;line-height:1.2;font-weight:bold}
+.gp td.u{font-size:9pt}
 .gp td.we{background:#f3f3f3}
 .gp td.alt,.gp th.alt{background:#e3edf8}
 .gp td.alt.we{background:#d3dfec}
 .gp th.alt.we{background:#c8d6e6}
-.gp td b{font-size:15px}
+.gp td b{font-size:13pt}
 .gp td.z b{text-decoration:line-through;color:#777}
-.gp td .nt{display:block;font-size:8px;color:#444;line-height:1.1}
-.gp td.tot{font-size:11px}
+.gp td .nt{display:block;font-size:7pt;color:#444;line-height:1.1}
+.gp td.tot{font-size:10pt}
 .mx.em td{white-space:normal}
 .mx.em td.cell{min-width:0!important;width:auto}
 .em td.slot{font-weight:bold;white-space:normal;min-width:90px}
@@ -185,6 +188,26 @@ td.place .bad{color:var(--zero)}
 .cal .it .oth{font-size:.8em;color:#555}
 .cal.inst td:nth-child(4),.cal.inst td:nth-child(6){text-align:right}
 .cal th.sun,.cal td.sun .dn{color:#b00}.cal th.sat,.cal td.sat .dn{color:#03a}
+#printview>div:first-child>.calpage:first-child{break-before:auto}
+#printview>div+div>.calpage:first-child{break-before:page}
+/* 6-day calendar sheet (日別 / 作業場所別 print), A4 横 */
+.d5{width:100%;border-collapse:collapse;table-layout:fixed}
+.d5 th{border:1px solid #000;background:#eee;color:#000;font-size:14pt;padding:2px;text-align:center}
+.d5 th.we{background:#d9d9d9}.d5 th.sun{color:#b00}.d5 th.sat{color:#03a}
+.d5 td{border:1px solid #000;vertical-align:top;padding:0;font-size:var(--fs,12pt);line-height:1.25;color:#000}
+.d5 td.we{background:#f6f6f6}
+.d5 .col{display:flex;flex-direction:column;font-size:var(--fs,12pt)}
+.d5 .it{padding:2px 4px;border-bottom:1px dotted #999}
+.d5 .it .ln{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;column-gap:4px}
+.d5 .it .q{white-space:nowrap;font-weight:bold;margin-left:auto}
+.d5 .it .q small{font-weight:normal;font-size:.8em}
+.d5 .it .nm{font-weight:bold}
+.d5 .it.z{color:#777;text-decoration:line-through}
+.d5 .it .oth{font-size:.75em;color:#555}
+.d5 .it .nt{font-size:.8em;color:#333}
+.d5 .wa{flex:1;min-height:var(--wa,30mm);border-top:1.5px solid #000;background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(9mm - 1px),#aaa calc(9mm - 1px),#aaa 9mm)}
+.d5 .wa span{display:block;font-size:8pt;color:#666;padding:1px 4px;background:inherit}
+.d5page .foot{font-size:9pt;margin:3px 0 0}
 @media print{
   body{background:#fff}
   main{max-width:none;padding:0}
@@ -865,7 +888,7 @@ function renderEmPrint() {
 
 // Printed on B4 縦 (JIS). Long periods are split into pages of at most MX_DAYS_PER_PAGE days so the
 // date columns stay wide enough to write in; each page's 合計 is for its own days.
-const MX_DAYS_PER_PAGE = 16; // B4 width: 16 days ≈ 10mm per date column
+const MX_DAYS_PER_PAGE = 11; // ~10 days per B4 sheet, like the floor sample, so Excel prints at 100% (no shrink-to-fit) and the fonts stay at their set size
 // The 品目×日付 sheet as pages { title, sub, days, prods, items, place }. The print and the Excel export both use this,
 // so they split the same way (one Excel sheet per printed page).
 function mxPages(items, title, sub, place) {
@@ -908,7 +931,7 @@ function gridPagePart({ items, prods, days, title, sub }) {
   }).join('');
   return `<div class="mxpage"><h1>${esc(title)}　${md(f)}〜${md(t)}<span>${esc(sub)}</span></h1>
     <table class="gp"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${days.length + 3}">予定なし</td></tr>`}</tbody></table>
-    <p style="font-size:9px;margin:3px 0 0">変更があれば数字を○で囲むか、新しい数字を書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
+    <p class="foot">変更があれば数字を○で囲むか、新しい数字を書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
 }
 // 品目×日付 rows: products planned in the period, plus every 使用中 product that passes the 分類 / 作業場所 filters,
 // even with no plan (blank row to write in). `place` limits the list to one 作業場所 page.
@@ -939,56 +962,69 @@ function renderMxPrint(items) {
   $('printview').innerHTML = mxAllPages(items).map(gridPagePart).join('') || '<h1>この期間の予定はありません</h1>';
 }
 
-// One calendar page: whole weeks (Sun–Sat) covering f..t. `place` (作業場所別) marks other places sharing the item.
-function calendarPage(items, f, t, title, sub, place) {
-  const [fy, fm, fd] = f.split('-').map(Number), [ty, tm, td] = t.split('-').map(Number);
-  const start = new Date(fy, fm - 1, fd); start.setDate(start.getDate() - start.getDay());
-  const end = new Date(ty, tm - 1, td); end.setDate(end.getDate() + (6 - end.getDay()));
-  let h = `<div class="calpage"><h1>${esc(title)} ${fm}/${fd}〜${tm}/${td}<span>${esc(sub)}</span></h1>
-  <table class="cal"><tr>${WD.map((w, i) => `<th class="${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</th>`).join('')}</tr>`;
-  const weeks = Math.round((end - start) / 864e5 + 1) / 7;
-  const rowH = (PAGE_H_MM - 16) / weeks;
-  for (const d = new Date(start); d <= end;) {
-    h += `<tr data-h="${rowH}">`;
-    for (let i = 0; i < 7; i++, d.setDate(d.getDate() + 1)) {
-      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-      const cls = [key < f || key > t ? 'out' : '', i === 0 ? 'sun' : i === 6 ? 'sat' : ''].join(' ');
-      const list = key < f || key > t ? [] : items.filter(it => it.date === key);
-      h += `<td class="${cls}"><div class="dn">${d.getMonth() + 1}/${d.getDate()}</div>` +
-        list.map(it => {
-          const oth = place && place !== DEPT_UNKNOWN ? others(it, place) : place === DEPT_UNKNOWN ? (it.placeRaw || '空欄') : '';
-          // Name, lot (計画 and 計画×ロット), and that day's 備考 on its own line
-          return `<div class="it ${it.plan === 0 ? 'z' : ''}"><span class="q">${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <small>(${fmt(it.qty)}${esc(it.unit)})</small>` : ''}</span>${esc(it.name)}${oth ? ` <span class="oth">[${esc(oth)}]</span>` : ''}${it.note ? `<span class="nt">※${esc(it.note)}</span>` : ''}</div>`;
-        }).join('') +
-        '</td>';
-    }
-    h += '</tr>';
-  }
-  return h + '</table></div>';
+// ---- Calendar print (日別 and 作業場所別): CAL_DAYS consecutive days per A4 横 sheet, one column per day,
+// large text, and a ruled write-in area at the bottom of every day for additions and changes.
+const CAL_DAYS = 6, CAL_MAX_PT = 20;
+const calItemHtml = (it, place) => {
+  // `place` (作業場所別) marks the other places sharing the item; on the 未確認 page, what was typed
+  const oth = place && place !== DEPT_UNKNOWN ? others(it, place) : place === DEPT_UNKNOWN ? (it.placeRaw || '空欄') : '';
+  // Name on its own line (columns are narrow); below it that day's 備考 on the left and the lot (計画 and 計画×ロット) on the right
+  return `<div class="it ${it.plan === 0 ? 'z' : ''}"><div class="nm">${esc(it.name)}${oth ? ` <span class="oth">[${esc(oth)}]</span>` : ''}</div>
+    <div class="ln"><span class="nt">${it.note ? `※${esc(it.note)}` : ''}</span><span class="q">${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <small>(${fmt(it.qty)}${esc(it.unit)})</small>` : ''}</span></div></div>`;
+};
+// One sheet: `lists` is [{ key, items }] for up to CAL_DAYS days
+function calendarPage(lists, title, sub, place) {
+  const md2 = k => { const [, m, d] = k.split('-').map(Number); return `${m}/${d}`; };
+  const head = lists.map(({ key }) => { const [y, m, d] = key.split('-').map(Number), w = new Date(y, m - 1, d).getDay();
+    return `<th class="${w === 0 ? 'sun we' : w === 6 ? 'sat we' : ''}">${m}/${d}（${WD[w]}）</th>`; }).join('');
+  const body = lists.map(({ key, items }) => { const [y, m, d] = key.split('-').map(Number), w = new Date(y, m - 1, d).getDay();
+    return `<td class="${w === 0 || w === 6 ? 'we' : ''}"><div class="col">${items.map(it => calItemHtml(it, place)).join('')}<div class="wa"><span>追加・変更</span></div></div></td>`; }).join('');
+  return `<div class="calpage d5page"><h1>${esc(title)}　${md2(lists[0].key)}〜${md2(lists[lists.length - 1].key)}<span>${esc(sub)}</span></h1>
+    <table class="d5"><colgroup>${lists.map(() => `<col style="width:${(100 / lists.length).toFixed(2)}%">`).join('')}</colgroup>
+    <thead><tr>${head}</tr></thead><tbody><tr>${body}</tr></tbody></table>
+    <p class="foot">変更・追加は各日の下の欄に書き込んでください。印刷日：${new Date().toLocaleDateString('ja-JP')}</p></div>`;
 }
-
-// The calendar for f..t, appended to #printview. If the busiest days don't fit one page at CAL_MIN_FS,
-// the weeks are split over more pages (2 pages, 3 pages… down to one week per page) so every plan is printed.
-const CAL_MIN_FS = 8;
+// One text size per sheet: each day's box finds the largest size (up to CAL_MAX_PT) at which its plans plus the write-in
+// space fit the sheet's height, and the whole sheet uses the smallest of those (the busiest day's), so all days match.
+// A busy day keeps 30mm to write in down to 7pt; below that the write-in space shrinks (15mm, then 8mm) so the text can
+// stay ≥ 5pt. All boxes are then stretched to the bottom of the sheet.
+const CAL_FIT_STEPS = [[30, 7], [15, 6], [8, 5]]; // [write-in mm, smallest pt]
+function fitDayPage(page) {
+  const mm = 96 / 25.4, cols = [...page.querySelectorAll('.col')];
+  cols.forEach(c => { c.style.height = ''; c.style.setProperty('--fs', '5pt'); c.style.setProperty('--wa', '8mm'); });
+  // Title, date header and footer: everything on the sheet except the tallest box
+  const avail = (PAGE_H_MM - 2) * mm - (page.scrollHeight - Math.max(...cols.map(c => c.offsetHeight)));
+  // Fits = not taller than the sheet allows and nothing (e.g. a long 計画 like 100倍 (100p)) wider than the box
+  const fits = (c, pt, wa) => { c.style.setProperty('--fs', pt + 'pt'); c.style.setProperty('--wa', wa + 'mm'); return c.offsetHeight <= avail && c.scrollWidth <= c.clientWidth + 1; };
+  const best = c => { // largest size this day alone could use
+    for (const [wa, minPt] of CAL_FIT_STEPS) {
+      if (!fits(c, minPt, wa)) continue;
+      let lo = fits(c, CAL_MAX_PT, wa) ? CAL_MAX_PT : minPt, hi = CAL_MAX_PT; // binary search to 0.25pt
+      while (hi - lo > 0.25) { const mid = (lo + hi) / 2; if (fits(c, mid, wa)) lo = mid; else hi = mid; }
+      return Math.floor(lo * 4) / 4;
+    }
+    return 5; // still too many: smallest size, it may run over the sheet
+  };
+  const pt = Math.min(...cols.map(best));
+  page.style.setProperty('--sheet-pt', pt); // (for checking)
+  // Every day at that size, each with as much write-in space as still fits
+  for (const c of cols) if (!CAL_FIT_STEPS.some(([wa]) => fits(c, pt, wa))) fits(c, pt, 8);
+  cols.forEach(c => c.style.height = avail + 'px');
+  return page.scrollHeight <= (PAGE_H_MM - 2) * mm + 1;
+}
+// The calendar for f..t, appended to #printview: every calendar day in the range, CAL_DAYS per sheet (11 days → 6 + 5).
+// Each date appears on exactly one sheet.
 function appendCalendar(items, f, t, title, sub, place) {
-  const [fy, fm, fd] = f.split('-').map(Number), [ty, tm, td] = t.split('-').map(Number);
-  const sun = new Date(fy, fm - 1, fd); sun.setDate(sun.getDate() - sun.getDay());
-  const nWeeks = Math.ceil(((new Date(ty, tm - 1, td) - sun) / 864e5 + 1) / 7);
+  const keys = [];
+  for (const d = toDate(f); ymd(d) <= t; d.setDate(d.getDate() + 1)) keys.push(ymd(d));
   const box = document.createElement('div');
   $('printview').appendChild(box);
-  for (let n = 1; n <= nWeeks; n++) {
-    const per = Math.ceil(nWeeks / n), pages = Math.ceil(nWeeks / per);
-    let html = '';
-    for (let p = 0; p < pages; p++) {
-      const a = new Date(sun); a.setDate(a.getDate() + p * per * 7);
-      const b = new Date(a); b.setDate(b.getDate() + per * 7 - 1);
-      const from = ymd(a) < f ? f : ymd(a), to = ymd(b) > t ? t : ymd(b);
-      html += calendarPage(items, from, to, title, pages > 1 ? `${p + 1}/${pages}枚目　｜　${sub}` : sub, place);
-    }
-    box.innerHTML = html;
-    const all = [...box.querySelectorAll('.calpage')];
-    if (all.every(pg => fitPage(pg, CAL_MIN_FS))) return;
-    if (n === nWeeks) all.forEach(pg => fitPage(pg)); // one week per page and still crowded: go below CAL_MIN_FS
+  for (let i = 0; i < keys.length; i += CAL_DAYS) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = calendarPage(keys.slice(i, i + CAL_DAYS).map(key => ({ key, items: items.filter(it => it.date === key) })), title, sub, place);
+    const page = tmp.firstElementChild;
+    box.appendChild(page);
+    fitDayPage(page);
   }
 }
 
@@ -998,7 +1034,7 @@ function renderPrint(items) {
   appendCalendar(items, $('from').value, $('to').value, 'ロット予定', `${cats}　｜　${$('fileinfo').textContent}`);
 }
 
-// Step the font size down until the page fits one A4 landscape page (計画表: the chosen paper); false if not even at minFs
+// 早朝 計画表: step the font size down until the page fits the chosen paper; false if not even at minFs
 const PAGE_H_MM = 210 - 14;
 function fitPage(page, minFs = 5) {
   const em = page.classList.contains('empage'), H = em ? EM_PAPER[emPaper].h : PAGE_H_MM;
@@ -1014,7 +1050,7 @@ function fitPage(page, minFs = 5) {
   return false;
 }
 function fitPrint() {
-  for (const page of $('printview').querySelectorAll('.calpage, .empage')) fitPage(page);
+  for (const page of $('printview').querySelectorAll('.empage')) fitPage(page);
 }
 window.addEventListener('beforeprint', () => { if (view !== 'inst' && !(view === 'em' && emPrint === 'day')) fitPrint(); });
 
@@ -1345,6 +1381,9 @@ async function saveMxStyled(pages, filename) {
 
     // Row 2: header. Weekend columns darker, every other date tinted, 日 red / 土 blue
     const head = ws.getRow(2);
+// Font sizes follow the floor's 計画表_2026-11-21_2026-11-30.xlsx: title 16, header 10, 品目名 12 bold, 単位 9,
+// 計画 13 bold, 備考 7, 合計 10, footer 9 (pt). The browser print (.gp CSS) uses the same sizes.
+const MX_FONT = 'ＭＳ Ｐゴシック';
     head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`), '合計'];
     head.height = 30;
     for (let c = 1; c <= last; c++) {
@@ -1359,14 +1398,14 @@ async function saveMxStyled(pages, filename) {
     prods.forEach((p, r) => {
       const row = ws.getRow(3 + r), mine = items.filter(i => i.order === p.order);
       row.getCell(1).value = p.name;
-      row.getCell(1).font = { bold: true, size: 11 };
+      row.getCell(1).font = { bold: true, size: 12 };
       row.getCell(1).alignment = { vertical: 'middle', wrapText: true };
       row.getCell(2).value = p.planUnit;
       row.getCell(2).font = { size: 9 };
       let noteLines = 0;
       days.forEach((d, n) => {
         const it = mine.find(i => i.date === d.key), cell = row.getCell(3 + n);
-        if (!it) return;
+        if (!it) { cell.font = { bold: true, size: 13 }; return; } // anything typed in later is as large as the plans
         const pf = { bold: true, size: 13, ...(it.plan === 0 ? { strike: true, color: { argb: 'FF777777' } } : {}) };
         if (it.note) {
           cell.value = { richText: [{ text: fmt(it.plan), font: pf }, { text: '\n' + it.note, font: { size: 7, color: { argb: 'FF444444' } } }] };
@@ -1382,8 +1421,8 @@ async function saveMxStyled(pages, filename) {
         cell.border = border;
       }
       // At least 11mm like the print (room to write in); taller for long names or long 備考
-      const nameLines = Math.ceil(textW(p.name) * 1.1 / (NAME_W - 1));
-      row.height = Math.max(31, nameLines * 14 + 6, 20 + noteLines * 10);
+      const nameLines = Math.ceil(textW(p.name) * 1.2 / (NAME_W - 1)); // 12pt bold
+      row.height = Math.max(31, nameLines * 15 + 4, 20 + noteLines * 10);
     });
     if (!prods.length) {
       ws.mergeCells(3, 1, 3, last);
@@ -1422,6 +1461,11 @@ $('cats').onchange = render;
 $('placeQ').oninput = render;
 $('csv').onclick = downloadCSV;
 $('print').onclick = () => window.print();
+    // Every cell and every rich-text run in ＭＳ Ｐゴシック, the font the floor's copy uses
+    ws.eachRow({ includeEmpty: true }, row => row.eachCell({ includeEmpty: true }, cell => {
+      if (cell.value && cell.value.richText) cell.value = { richText: cell.value.richText.map(r => ({ ...r, font: { ...r.font, name: MX_FONT } })) };
+      cell.font = { ...cell.font, name: MX_FONT };
+    }));
 $('allc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = true); render(); };
 $('defc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = DEFAULT_CATS.some(dc => norm(dc) === norm(i.value))); render(); };
 </script>
