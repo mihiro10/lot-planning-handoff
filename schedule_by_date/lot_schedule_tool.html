@@ -328,6 +328,9 @@ function loadPlaceList(workbook) {
 }
 const $ = id => document.getElementById(id);
 let parsed = null, view = 'day';
+// Tabs, in order. TABS_OFF hides a tab without removing its code; delete an entry to bring the tab back.
+const TABS = [['day', '日別'], ['mx', '品目×日付'], ['inst', '肉専用指示書発行'], ['dept', '作業場所別'], ['em', '早朝肉処理指示']];
+const TABS_OFF = ['inst', 'dept']; // turned off for now (2026-11-11)
 
 // Normalise full-width parens/spaces so "冷凍（箱）" and "冷凍(箱)" match
 const norm = s => String(s ?? '').replace(/（/g, '(').replace(/）/g, ')').replace(/\s+/g, '').trim();
@@ -580,13 +583,14 @@ const fmt = n => n === null ? '' : n.toLocaleString('ja-JP');
 
 function render() {
   if (!parsed) return;
+  if (TABS_OFF.includes(view)) view = 'day';
   markPreset();
   renderStatusAlert();
   const items = selected();
   const live = items.filter(i => i.plan !== 0);
   const days = parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value);
   let html = `<div class="stats"><div><b>${live.length}</b>製造予定</div><div><b>${new Set(live.map(i => i.date)).size}</b>製造日</div><div><b>${new Set(live.map(i => i.name)).size}</b>品目</div><div><b>${items.length - live.length}</b>0（中止・変更）</div></div>
-  <div class="tabs noprint"><button data-v="day" class="${view === 'day' ? 'on' : ''}">日別</button><button data-v="mx" class="${view === 'mx' ? 'on' : ''}">品目×日付</button><button data-v="inst" class="${view === 'inst' ? 'on' : ''}">肉専用指示書発行</button><button data-v="dept" class="${view === 'dept' ? 'on' : ''}">作業場所別</button><button data-v="em" class="${view === 'em' ? 'on' : ''}">早朝肉処理指示</button></div>`;
+  <div class="tabs noprint">${TABS.filter(([v]) => !TABS_OFF.includes(v)).map(([v, label]) => `<button data-v="${v}" class="${view === v ? 'on' : ''}">${label}</button>`).join('')}</div>`;
 
   if (view === 'day') {
     for (const d of days) {
