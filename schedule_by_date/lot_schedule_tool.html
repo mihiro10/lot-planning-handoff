@@ -249,8 +249,6 @@ cal th.sat,.cal td.sat .dn{color:#03a}
     <div class="presets" id="placePresets"></div>
   </div>
   <div class="row noprint" style="margin-top:14px">
-    <button id="csv">CSVダウンロード</button>
-    <button class="ghost" id="print">印刷</button>
     <button class="ghost" id="allc">分類すべて</button>
     <button class="ghost" id="defc">冷凍のみ</button>
   </div>
@@ -593,6 +591,10 @@ function render() {
   <div class="tabs noprint">${TABS.filter(([v]) => !TABS_OFF.includes(v)).map(([v, label]) => `<button data-v="${v}" class="${view === v ? 'on' : ''}">${label}</button>`).join('')}</div>`;
 
   if (view === 'day') {
+    html += `<div class="panel noprint"><div class="row">
+      <button id="dayPrint">印刷</button>
+      <button class="ghost" id="dayCsv">CSVダウンロード</button></div>
+      <p class="note" style="margin:10px 0 0">印刷は6日ずつのカレンダー（A4横）。各日の下に追加・変更を書き込む欄があります。</p></div>`;
     for (const d of days) {
       const list = items.filter(i => i.date === d.key);
       const wd = new Date(d.y, d.m - 1, d.d).getDay();
@@ -613,6 +615,7 @@ function render() {
       <button id="mx10">10日間（明日から）</button>
       <button class="ghost" id="mxPrint">印刷</button>
       <button class="ghost" id="mxXlsx">Excelに書き出し</button>
+      <button class="ghost" id="mxCsv">CSVダウンロード</button>
       ${parsed.hasPlace ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mxSplit" ${mxSplit ? 'checked' : ''}>${esc(parsed.placeLabel)}ごとにページを分ける</label>` : ''}
       </div><p class="note" style="margin:10px 0 0">計画の数字を表示します。状態が「使用中」の品目は計画がなくても行を出します。印刷は空欄も大きめのマスなので、変更があれば○や数字を書き込めます。</p></div>`;
     const prods = mxProducts(items);
@@ -650,12 +653,17 @@ function render() {
     $('mx10').onclick = setTenDays;
     $('mxPrint').onclick = () => window.print();
     $('mxXlsx').onclick = () => exportMxXlsx(items);
+    $('mxCsv').onclick = () => downloadRowsCsv(mxPlainRows(items), `計画表_${$('from').value}_${$('to').value}.csv`);
     if ($('mxSplit')) $('mxSplit').onchange = e => { mxSplit = e.target.checked; render(); };
     renderMxPrint(items);
   } else if (view === 'dept') {
     $('deptPrint').onclick = () => window.print();
     renderDeptPrint();
-  } else renderPrint(items);
+  } else {
+    $('dayPrint').onclick = () => window.print();
+    $('dayCsv').onclick = downloadCSV;
+    renderPrint(items);
+  }
 }
 
 // ---- 品目×日付 print: product rows × date columns of 計画, big cells to write changes in ----
@@ -1368,15 +1376,29 @@ function exportMxXlsx(items) {
   const f = $('from').value, t = $('to').value, filename = `計画表_${f}_${t}.xlsx`, pages = mxAllPages(items);
   loadExcelJS().then(() => saveMxStyled(pages, filename)).catch(err => {
     console.error(err); // ExcelJS couldn't load (or failed): plain table instead, so the export still works
-    const days = parsed.dates.filter(d => d.key >= f && d.key <= t), prods = mxProducts(items);
-    const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
-    for (const p of prods) {
-      const mine = items.filter(i => i.order === p.order);
-      rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
-        mine.reduce((s, i) => s + (i.plan || 0), 0)]);
-    }
-    saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...days.map(() => 8), 8] }], filename);
+    const rows = mxPlainRows(items), nDays = rows[0].length - 5;
+    saveXlsx([{ name: '計画表', rows, widths: [34, 10, 12, 6, ...Array(nDays).fill(8), 8] }], filename);
   });
+}
+// 品目×日付 as a plain table: one row per 品目 (same list as the screen), one column per date, then 合計
+function mxPlainRows(items) {
+  const f = $('from').value, t = $('to').value;
+  const days = parsed.dates.filter(d => d.key >= f && d.key <= t), prods = mxProducts(items);
+  const rows = [['品目名', 'コード', '分類', '単位', ...days.map(d => `${d.m}/${d.d}(${WD[toDate(d.key).getDay()]})`), '合計']];
+  for (const p of prods) {
+    const mine = items.filter(i => i.order === p.order);
+    rows.push([p.name, p.code, p.cat, p.planUnit, ...days.map(d => { const it = mine.find(i => i.date === d.key); return it ? it.plan : ''; }),
+      mine.reduce((s, i) => s + (i.plan || 0), 0)]);
+  }
+  return rows;
+}
+// CSV with a BOM so Excel opens the Japanese text correctly
+function downloadRowsCsv(rows, filename) {
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const blob = new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // Font sizes follow the floor's 計画表_2026-11-21_2026-11-30.xlsx: title 16, header 10, 品目名 12 bold, 単位 9,
@@ -1492,8 +1514,6 @@ drop.addEventListener('drop', e => loadFiles(e.dataTransfer.files));
 ['from', 'to', 'showZero'].forEach(id => $(id).onchange = render);
 $('cats').onchange = render;
 $('placeQ').oninput = () => { markPreset(); render(); };
-$('csv').onclick = downloadCSV;
-$('print').onclick = () => window.print();
 $('allc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = true); render(); };
 $('defc').onclick = () => { $('cats').querySelectorAll('input').forEach(i => i.checked = DEFAULT_CATS.some(dc => norm(dc) === norm(i.value))); render(); };
 </script>
