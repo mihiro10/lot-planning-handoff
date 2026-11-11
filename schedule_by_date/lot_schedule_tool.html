@@ -178,6 +178,9 @@ td.place .bad{color:var(--zero)}
 .rules table.zk tr:first-child th{background:var(--alt)}
 .chgl td{font-size:var(--fs,16px);vertical-align:middle;padding:6px 4px}
 .evx tr.ng td{background:#fbe3e3}
+/* サブ不可: a boxed, bold 不可 so it reads in black-and-white print too */
+.blk{display:inline-block;border:1.5px solid currentColor;border-radius:3px;padding:0 4px;margin-bottom:2px}
+.blk b{font-size:1.1em}
 .evwrap{background:#fff;color:#000;border:1px solid var(--line,#ccc);border-radius:8px;padding:8px;overflow-x:auto}
 .evwrap .evx{min-width:960px}
 .evwrap .evx td{height:40px;font-size:16px}
@@ -385,9 +388,21 @@ function parseSheet(ws) {
     else if (cur && t.startsWith('入庫予定数') && !cur.qty) { cur.qty = row; if (unitOf(t)) cur.unit = unitOf(t); }
   }
 
+  // サブ不可日: a marker row such as 「サブメニュー不可」 (製造枠＝サブ冷凍, or サブ in the name) is not a product.
+  // A date is 不可 when its 備考 says 不可 (or its 計画 is above 0); the 備考 text after 不可 is the reason.
+  const blocked = [];
+  blocks.forEach(b => {
+    if (!/不可/.test(b.name) || (EM_FRAME[b.slot] || (/サブ/.test(b.name) ? 'サブ' : '')) !== 'サブ') return;
+    b.block = true;
+    for (const d of dates) {
+      const n = String(b.notes[d.i] ?? '').trim(), p = b.plan ? num(b.plan[d.i]) : null;
+      if (/不可/.test(n) || p > 0) blocked.push({ date: d.key, reason: n.replace(/^不可/, '').replace(/^[（(]|[）)]$/g, '').trim() });
+    }
+  });
+
   const items = [];
   blocks.forEach((b, order) => {
-    if (!b.plan || !b.name) return;
+    if (!b.plan || !b.name || b.block) return;
     for (const d of dates) {
       const p = num(b.plan[d.i]);
       if (p === null) continue;
@@ -405,8 +420,8 @@ function parseSheet(ws) {
     .map(b => ({ row: b.excelRow, code: b.code, name: b.name, raw: b.placeRaw, bad: b.place.bad }));
   // Every product row (planned or not), so 使用中 products can be listed even without a plan. Template rows are skipped.
   const products = blocks.map((b, order) => ({ order, cat: b.cat, code: b.code, name: b.name, planUnit: b.planUnit, status: b.status, row: b.excelRow,
-    places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot })).filter(b => b.name && !b.name.startsWith('テンプレート'));
-  return { items, dates, products, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0 };
+    places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot, block: b.block })).filter(b => b.name && !b.block && !b.name.startsWith('テンプレート'));
+  return { items, dates, products, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0, blocked };
 }
 
 // Several workbooks (e.g. 守屋 + 杉田, or last month + this month) are shown as one schedule.
@@ -493,7 +508,10 @@ function mergeParsed(parts) {
   const products = [...new Map(rank.flatMap(fi => parts[fi].products).map(b => [b.order, b])).values()];
   const dates = [...new Map(parts.flatMap(p => p.dates).map(d => [d.key, d])).values()].sort((a, b) => a.key.localeCompare(b.key));
   const withPlace = parts.find(p => p.hasPlace);
+  const blocked = new Map(); // date → reason ('' when none); the sheet that starts later wins
+  for (const fi of rank) for (const x of parts[fi].blocked) blocked.set(x.date, x.reason);
   return {
+    blocked,
     items: [...cells.values()].flatMap(c => c.items), products, dates, conflicts, multi: parts.length > 1,
     hasPlace: !!withPlace, placeLabel: withPlace ? withPlace.placeLabel : '作業場所', hasSlot: parts.some(p => p.hasSlot),
     placeIssues: parts.flatMap(p => p.placeIssues.map(i => ({ ...i, file: p.file }))),
@@ -698,16 +716,19 @@ function emDay(key) {
   const live = all.filter(it => it.plan !== 0);
   const main = live.filter(it => emSlotOf(it) === 'メイン'), sub = live.filter(it => emSlotOf(it) === 'サブ');
   const free = Object.fromEntries(EM_FREE.map(s => [s, live.filter(it => emSlotOf(it) === s)]));
-  const pat = EM_PATTERNS.find(p => main.length <= p.main && sub.length <= p.sub);
+  // サブ不可日: the 2枠目 (サブ and メイン②) is closed, so only one メイン fits
+  const block = parsed.blocked.has(key) ? { reason: parsed.blocked.get(key) } : null;
+  const pat = block ? main.length <= 1 && !sub.length : EM_PATTERNS.find(p => main.length <= p.main && sub.length <= p.sub);
   // Slot 1 = first main. Slot 2 = second main, else the sub. Anything beyond that is over capacity.
-  const slot1 = main.slice(0, 1), slot2 = main.length >= 2 ? main.slice(1, 2) : sub.slice(0, 1);
-  const over = main.length >= 2 ? [...main.slice(2), ...sub] : [...main.slice(1), ...sub.slice(1)];
+  const slot1 = main.slice(0, 1), slot2 = block ? [] : main.length >= 2 ? main.slice(1, 2) : sub.slice(0, 1);
+  const over = block ? [...main.slice(1), ...sub] : main.length >= 2 ? [...main.slice(2), ...sub] : [...main.slice(1), ...sub.slice(1)];
   let status, ng = false;
-  if (!pat) { ng = true; status = `⚠ 超過（メイン${main.length}・サブ${sub.length}）`; }
+  if (!pat) { ng = true; status = block ? `⚠ サブ不可の日に予定（メイン${main.length}・サブ${sub.length}）` : `⚠ 超過（メイン${main.length}・サブ${sub.length}）`; }
+  else if (block) status = 'サブ不可';
   else if (main.length === 2) status = 'メイン2本';
   else if (!main.length && !sub.length) status = live.length ? '冷凍なし' : '予定なし';
   else status = main.length && sub.length ? '通常' : '空き枠あり';
-  return { key, all, live, main, sub, free, slot1, slot2, over, zero: all.filter(it => it.plan === 0), status, ng };
+  return { key, all, live, main, sub, free, slot1, slot2, over, zero: all.filter(it => it.plan === 0), status, ng, block };
 }
 const emDays = () => parsed.dates.filter(d => d.key >= $('from').value && d.key <= $('to').value).map(d => emDay(d.key));
 const emQty = it => `${fmt(it.plan)}${esc(it.planUnit)}${it.qty !== null && it.unit !== it.planUnit ? ` <span class="tag">(${fmt(it.qty)}${esc(it.unit)})</span>` : ''}`;
@@ -731,6 +752,7 @@ function emLines(day) {
   const cols = Object.fromEntries(EM_COLS.map(([k]) => [k, []]));
   const add = (k, it, extra) => cols[k].push({ it, change: emChangeOf(day.key, it), ...extra });
   day.slot1.forEach(it => add('s1', it));
+  if (day.block) cols.s2.push({ block: day.block });
   day.slot2.forEach(it => add('s2', it, { tag: emSlotOf(it) === 'メイン' ? 'メイン②' : '' }));
   day.over.forEach(it => add('s2', it, { over: true }));
   EM_FREE.forEach(s => day.free[s].forEach(it => add(s, it)));
@@ -742,7 +764,9 @@ function emLines(day) {
   return cols;
 }
 const emChgTag = c => c.type === '変更' ? `<span class="chg">変更 ${esc(c.before)}→</span> ` : `<span class="chg">${c.type}</span> `;
+const emBlockText = b => `不可${b.reason ? `（${b.reason}）` : ''}`;
 function emLineHtml(l) {
+  if (l.block) return `<div class="blk"><b>不可</b>${l.block.reason ? `（${esc(l.block.reason)}）` : ''}</div>`;
   if (l.cancel) return `<div class="cx"><span class="chg">キャンセル</span> <s>${esc(l.cancel.name)} ${esc(emPlanText(l.cancel))}</s></div>`;
   if (l.zero) return `<div class="zz">${esc(l.it.name)} 0</div>`;
   const it = l.it, chg = l.change ? emChgTag(l.change) : '';
@@ -781,6 +805,7 @@ const EM_RULES = `<details class="rules" open><summary>変更・キャンセル�
   <ul><li><b>日をずらすとき</b>は「変更」にしない：元の日＝<b>0＋キャン</b>、新しい日＝<b>倍数＋追加</b>。</li>
   <li><b>空欄と0は違う</b>：空欄＝もともと予定なし（計画表に出ない）、0＝キャンセル（取り消し線で出る）。</li>
   <li><b>在庫表にない品目を足すとき</b>：品目の行を作り、<b>「肉処理 製造枠」の列</b>に メイン冷凍／サブ冷凍／餃子／キット／米飯課・宅配／販促／その他 のどれかを入れる（空欄・0だと計画表に出ません）。</li>
+  <li><b>サブ不可の日</b>：品目名「<b>サブメニュー不可</b>」（肉処理 製造枠＝サブ冷凍）の行の<b>「備考」</b>に、その日付の列で <b>不可（理由）</b> と入れる（例：不可（休みが多いため））。その日の2枠目（サブ冷凍・メイン②）は「不可」と理由が出て、予定が入っていると⚠になります。</li>
   <li>印刷用のExcelを手で直すときも同じ区分で：<b>【変更 3倍→】</b>・<b>【キャンセル】</b>＋取り消し線・<b>【追加】</b>、直したセルは<b>黄色</b>。</li></ul></details>`;
 
 // The plan of the last export is remembered in this browser and compared against automatically
@@ -837,6 +862,7 @@ function emDayRows(withHeader) {
   const label = it => it === day.slot1[0] ? 'メイン冷凍' : day.slot2.includes(it) ? (emSlotOf(it) === 'メイン' ? 'メイン冷凍②' : 'サブ冷凍') : EM_FREE.includes(emSlotOf(it)) ? emSlotOf(it) : '⚠超過';
   const rows = [...day.slot1, ...day.slot2, ...day.over, ...EM_FREE.flatMap(s => day.free[s])].map(it =>
     [`${y}/${m}/${d}`, wd, label(it), it.code, it.name, it.plan, it.planUnit, it.qty ?? '', it.unit, '', it.note]);
+  if (day.block) rows.splice(day.slot1.length, 0, [`${y}/${m}/${d}`, wd, 'サブ冷凍', '', '不可', '', '', '', '', '', day.block.reason]);
   return withHeader ? [['日付', '曜日', '枠', 'コード', '品目名', '計画', '計画単位', '数量', '単位', '出来高', '備考'], ...rows] : rows;
 }
 
@@ -849,8 +875,8 @@ function renderEm() {
   if (!parsed.items.some(emSlotOf)) return `<div class="empty">${parsed.hasSlot ? '「肉処理 製造枠」が入った品目の計画がありません。' : 'このシートには 冷凍品・冷凍(箱)・販売用餃子/通販 の計画がありません（早朝の在庫表を入れてください）。'}</div>`;
   const ng = days.filter(d => d.ng);
   let h = ng.length ? `<details class="alert" open><summary>⚠ 枠オーバーの日があります（${ng.length}日）</summary><table><tr><th>日付</th><th>メイン</th><th>サブ</th><th>内容</th></tr>${ng.map(d =>
-    `<tr><td>${md(d.key)}</td><td>${d.main.length}</td><td>${d.sub.length}</td><td>${[...d.main, ...d.sub].map(it => esc(it.name)).join('、')}</td></tr>`).join('')}</table>
-    <p class="note">1日に「メイン1＋サブ1」または「メイン2・サブなし」まで。</p></details>` : '';
+    `<tr><td>${md(d.key)}</td><td>${d.main.length}</td><td>${d.sub.length}</td><td>${d.block ? `<b>サブ${esc(emBlockText(d.block))}</b>　` : ''}${[...d.main, ...d.sub].map(it => esc(it.name)).join('、')}</td></tr>`).join('')}</table>
+    <p class="note">1日に「メイン1＋サブ1」または「メイン2・サブなし」まで。サブ不可の日はメイン1本だけ。</p></details>` : '';
   h += `<div class="panel noprint"><div class="row">
     <button id="em10">10日間（明日から）</button>
     <span class="seg"><button class="${emLayout === 'sheet' ? 'on' : ''}" data-l="sheet">日付×枠（印刷イメージ）</button><button class="${emLayout === 'grid' ? 'on' : ''}" data-l="grid">枠×日付</button></span>
@@ -1240,12 +1266,13 @@ function exportEmXlsx() {
   for (const d of days) {
     grid.push([toDate(d.key), WD[toDate(d.key).getDay()],
       [...d.slot1.map(txt), ...zero(d, 'メイン')].join('／'),
-      [...d.slot2.map(it => (emSlotOf(it) === 'メイン' ? '【メイン②】' : '') + txt(it)), ...d.over.map(it => '【超過】' + txt(it)), ...zero(d, 'サブ')].join('／'),
+      [...(d.block ? [emBlockText(d.block)] : []), ...d.slot2.map(it => (emSlotOf(it) === 'メイン' ? '【メイン②】' : '') + txt(it)), ...d.over.map(it => '【超過】' + txt(it)), ...zero(d, 'サブ')].join('／'),
       ...EM_FREE.map(s => [...d.free[s].map(txt), ...zero(d, s)].join('／'))]);
   }
   const detail = [['日付', '曜日', '枠', 'コード', '品目名', '計画', '計画単位', '数量', '単位', '備考']];
   for (const d of days) {
     const label = it => it.plan === 0 ? '中止' : d.slot1.includes(it) ? 'メイン冷凍' : d.slot2.includes(it) ? (emSlotOf(it) === 'メイン' ? 'メイン冷凍②' : 'サブ冷凍') : EM_FREE.includes(emSlotOf(it)) && !d.over.includes(it) ? emSlotOf(it) : '超過';
+    if (d.block) detail.push([toDate(d.key), WD[toDate(d.key).getDay()], 'サブ冷凍', '', '不可', '', '', '', '', d.block.reason]);
     for (const it of [...d.slot1, ...d.slot2, ...d.over, ...EM_FREE.flatMap(s => d.free[s]), ...d.zero])
       detail.push([toDate(d.key), WD[toDate(d.key).getDay()], label(it), it.code, it.name, it.plan, it.planUnit, it.qty ?? '', it.unit, it.note]);
   }
@@ -1304,6 +1331,7 @@ async function saveEmStyled(days, detail, filename) {
     ...(it.note ? [{ text: ` ${it.note}`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : [])];
   const chgRun = c => ({ text: c.type === '変更' ? `【変更 ${c.before}→】` : `【${c.type}】`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } });
   const lineRuns = l => {
+    if (l.block) return [{ text: '不可', font: { size: FS + 2, bold: true } }, ...(l.block.reason ? [{ text: `（${l.block.reason}）`, font: { size: FS } }] : [])];
     if (l.cancel) return [chgRun({ type: 'キャンセル' }), { text: `${l.cancel.name} ${emPlanText(l.cancel)}`, font: { size: FS, strike: true, color: { argb: 'FF555555' } } }];
     if (l.zero) return [{ text: `${l.it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }];
     const pre = l.change ? [chgRun(l.change)] : [];
@@ -1329,7 +1357,9 @@ async function saveEmStyled(days, detail, filename) {
       const c = row.getCell(j + 1), i = j + 1;
       c.border = border;
       if (i > 2 && emHasChange(cols[EM_COLS[i - 3][0]])) c.fill = fill('#FFF3B0');
-      else if (d.ng) c.fill = fill('#FBE3E3'); else if (n % 2) c.fill = fill('#E8F0F8');
+      else if (d.ng) c.fill = fill('#FBE3E3');
+      else if (d.block && i > 2 && EM_COLS[i - 3][0] === 's2') c.fill = fill('#D9D9D9'); // サブ不可
+      else if (n % 2) c.fill = fill('#E8F0F8');
       c.alignment = i <= 2 ? { horizontal: 'center', vertical: 'middle' } : { vertical: 'top', wrapText: true };
       // Every cell gets the large font, so anything typed in later is just as readable
       c.font = i <= 2 ? { bold: true, size: FS, color: { argb: color } } : { size: FS };
