@@ -380,11 +380,14 @@ function parseSheet(ws) {
     const row = rows[r] || [];
     const t = norm(row[C.type]);
     if (t.startsWith('備考')) { // first row of each product block
-      cur = { cat: String(row[C.cat] ?? '').trim(), code: row[C.code] ?? '', name: String(row[C.name] ?? '').trim(), lot: num(row[C.lot]), cs: C.cs >= 0 ? num(row[C.cs]) : null, unit: String(row[C.unit] ?? ''), notes: row, plan: null, planUnit: '', qty: null, excelRow: firstRow + r,
+      cur = { cat: String(row[C.cat] ?? '').trim(), code: row[C.code] ?? '', name: String(row[C.name] ?? '').trim(), lot: num(row[C.lot]), cs: C.cs >= 0 ? num(row[C.cs]) : null, unit: String(row[C.unit] ?? ''), notes: row, plan: null, planUnit: '', qty: null, excelRow: firstRow + r, r0: r,
         status: C.status >= 0 ? norm(row[C.status]) : '', placeRaw: C.place >= 0 ? String(row[C.place] ?? '').trim() : '', slot: C.slot >= 0 ? norm(row[C.slot]) : '' };
       cur.place = C.place >= 0 ? checkPlaces(cur.placeRaw) : { ok: [], bad: [] };
       blocks.push(cur);
     } else if (cur && t.startsWith('計画') && !cur.plan) { cur.plan = row; cur.planUnit = unitOf(t); }
+    // 行種別 left blank on the row right under 備考 (seen in 杉田's sheet): NOT read as the 計画 row. The product is
+    // listed in an error so the team fixes the label in the Excel itself.
+    else if (cur && !t && r === cur.r0 + 1 && !cur.plan) cur.planMissing = true;
     else if (cur && t.startsWith('入庫予定数') && !cur.qty) { cur.qty = row; if (unitOf(t)) cur.unit = unitOf(t); }
   }
 
@@ -418,10 +421,11 @@ function parseSheet(ws) {
   // Every named product block is checked, planned or not, so the planner can fix them all
   const placeIssues = C.place < 0 ? [] : blocks.filter(b => b.name && b.place.bad.length)
     .map(b => ({ row: b.excelRow, code: b.code, name: b.name, raw: b.placeRaw, bad: b.place.bad }));
+  const labelIssues = blocks.filter(b => b.name && b.planMissing && !b.plan).map(b => ({ row: b.excelRow + 1, code: b.code, name: b.name }));
   // Every product row (planned or not), so 使用中 products can be listed even without a plan. Template rows are skipped.
   const products = blocks.map((b, order) => ({ order, cat: b.cat, code: b.code, name: b.name, planUnit: b.planUnit, status: b.status, row: b.excelRow,
     places: b.place.ok, placeBad: b.place.bad.length > 0, placeRaw: b.placeRaw, slot: b.slot, block: b.block })).filter(b => b.name && !b.block && !b.name.startsWith('テンプレート'));
-  return { items, dates, products, hasPlace: C.place >= 0, placeLabel, placeIssues, hasSlot: C.slot >= 0, blocked };
+  return { items, dates, products, hasPlace: C.place >= 0, placeLabel, placeIssues, labelIssues, hasSlot: C.slot >= 0, blocked };
 }
 
 // Several workbooks (e.g. 守屋 + 杉田, or last month + this month) are shown as one schedule.
@@ -515,6 +519,7 @@ function mergeParsed(parts) {
     items: [...cells.values()].flatMap(c => c.items), products, dates, conflicts, multi: parts.length > 1,
     hasPlace: !!withPlace, placeLabel: withPlace ? withPlace.placeLabel : '作業場所', hasSlot: parts.some(p => p.hasSlot),
     placeIssues: parts.flatMap(p => p.placeIssues.map(i => ({ ...i, file: p.file }))),
+    labelIssues: parts.flatMap(p => p.labelIssues.map(i => ({ ...i, file: p.file }))),
   };
 }
 
@@ -575,6 +580,11 @@ function renderPlaceAlert() {
     <table><tr><th>日付</th><th>コード</th><th>品目名</th><th>使わなかった値</th><th>使った値</th></tr>
     ${cf.map(c => `<tr><td>${md(c.date)}</td><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.oldPlan)}<br><span class="note">${esc(c.oldFile)}</span></td><td><b>${esc(c.plan)}</b><br><span class="note">${esc(c.file)}</span></td></tr>`).join('')}
     </table></details>` : '';
+  const li = parsed.labelIssues;
+  if (li.length) h = `<details class="alert" open style="border-width:3px"><summary>❌ エラー：計画の行の「行種別」が空欄です（${li.length}品目）— この品目の計画は読み込んでいません（表示・印刷・Excelに出ません）。Excelの「行種別」に「計画（倍）」と入力して保存し、ファイルを入れ直してください</summary>
+    <table><tr>${F ? '<th>ファイル</th>' : ''}<th>行</th><th>コード</th><th>品目名</th></tr>
+    ${li.map(i => `<tr>${F ? `<td>${esc(i.file)}</td>` : ''}<td>${i.row}</td><td>${esc(i.code)}</td><td>${esc(i.name)}</td></tr>`).join('')}
+    </table></details>` + h;
   if (!issues.length) { $('placeAlert').innerHTML = h; return; }
   const L = esc(parsed.placeLabel);
   $('placeAlert').innerHTML = h + `<details class="alert" ${issues.length <= 10 ? 'open' : ''}><summary>⚠ ${L}が一覧と一致しません（${issues.length}品目）— Excelで修正してください</summary>
