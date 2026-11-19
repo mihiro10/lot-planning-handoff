@@ -708,12 +708,17 @@ const EM_FRAME = { 'メイン冷凍': 'メイン', 'サブ冷凍': 'サブ', '�
 const EM_SLOTS = { '冷凍品': 'メイン', '冷凍(箱)': 'サブ', '販売用餃子/通販': '餃子' }; // fallback by 分類, keys compared with norm()
 const EM_PATTERNS = [{ name: '通常', main: 1, sub: 1 }, { name: 'メイン2本', main: 2, sub: 0 }];
 const EM_FREE = ['餃子', 'キット', '米飯課・宅配', '販促', 'その他'];
-// Columns of the 計画表, same order and header colours as サンプル_早朝肉処理計画表_2026-10_現場回答反映.xlsx
-const EM_COLS = [['s1', 'メイン冷凍', '#2F5D8A', 22], ['s2', 'メイン②/サブ冷凍', '#4F7FAF', 15], ['餃子', '餃子', '#B5651D', 13], ['キット', 'キット', '#3C8C5A', 13],
-  ['米飯課・宅配', '米飯課・宅配', '#7A5C9E', 11], ['販促', '販促', '#C0392B', 14], ['その他', 'その他', '#666666', 12]];
+// Columns of the 計画表, same order and header colours as サンプル_早朝肉処理計画表_2026-10_現場回答反映.xlsx.
+// The last value is the width share (adds up to 100; Excel width = ×1.5). 餃子 is narrow now that its names are short.
+const EM_COLS = [['s1', 'メイン冷凍', '#2F5D8A', 23], ['s2', 'メイン②/サブ冷凍', '#4F7FAF', 20], ['餃子', '餃子', '#B5651D', 11], ['キット', 'キット', '#3C8C5A', 12],
+  ['米飯課・宅配', '米飯課・宅配', '#7A5C9E', 10], ['販促', '販促', '#C0392B', 12], ['その他', 'その他', '#666666', 12]];
 let emDate = null, emPrint = 'grid', emLayout = 'sheet';
 // Anything named 餃子 is the 餃子 slot whatever its 分類 (e.g. ちくやの浜松餃子 is filed under 冷凍(箱))
 const EM_GYOZA_NAME = /餃子/;
+// Short names on the 計画表 (screen, print, Excel) so the narrow 餃子 column stays readable.
+// The pack count (…個) is kept; 明細, 変更一覧 and the 版 comparison keep the full 品目名.
+const EM_SHORT = [[/^ちくやの浜松餃子/, '浜松餃子'], [/^ふるさと納税用・通販用餃子/, '通販餃子']];
+const emName = name => EM_SHORT.reduce((s, [re, to]) => s.replace(re, to), String(name ?? ''));
 const emSlotOf = it => {
   if (it.hasSlot) return EM_FRAME[it.slot] || null; // per file: one may have the 製造枠 column and another not
   const k = Object.keys(EM_SLOTS).find(c => norm(c) === norm(it.cat));
@@ -777,11 +782,11 @@ const emChgTag = c => c.type === '変更' ? `<span class="chg">変更 ${esc(c.be
 const emBlockText = b => `不可${b.reason ? `（${b.reason}）` : ''}`;
 function emLineHtml(l) {
   if (l.block) return `<div class="blk"><b>不可</b>${l.block.reason ? `（${esc(l.block.reason)}）` : ''}</div>`;
-  if (l.cancel) return `<div class="cx"><span class="chg">キャンセル</span> <s>${esc(l.cancel.name)} ${esc(emPlanText(l.cancel))}</s></div>`;
-  if (l.zero) return `<div class="zz">${esc(l.it.name)} 0</div>`;
+  if (l.cancel) return `<div class="cx"><span class="chg">キャンセル</span> <s>${esc(emName(l.cancel.name))} ${esc(emPlanText(l.cancel))}</s></div>`;
+  if (l.zero) return `<div class="zz">${esc(emName(l.it.name))} 0</div>`;
   const it = l.it, chg = l.change ? emChgTag(l.change) : '';
-  if (l.over) return `<div class="over">${chg}⚠超過 ${esc(it.name)} ${emQty(it)}</div>`;
-  return `<div>${chg}${l.tag ? `<span class="tag">${l.tag}</span> ` : ''}${esc(it.name)} <b>${emQty(it)}</b>${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</div>`;
+  if (l.over) return `<div class="over">${chg}⚠超過 ${esc(emName(it.name))} ${emQty(it)}</div>`;
+  return `<div>${chg}${l.tag ? `<span class="tag">${l.tag}</span> ` : ''}${esc(emName(it.name))} <b>${emQty(it)}</b>${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</div>`;
 }
 const emHasChange = lines => lines.some(l => l.change || l.cancel);
 function emCells(day) {
@@ -847,17 +852,10 @@ const emRows = days => EM_COLS.filter(([k]) => ['s1', 's2', '餃子'].includes(k
 const EM_PAPER = { A4: { w: 196, h: 283 }, A3: { w: 283, h: 406 } };
 let emPaper = 'A4';
 
-// 日付×枠 sheet (the Excel layout): one row per date, every column shown so the crew can write in
-// Column widths follow the longest entry, so empty write-in columns don't squeeze the planned items into tiny text
-function emColWidths(days) {
-  const cells = days.map(emCells);
-  const len = html => Math.max(0, ...html.split('</div>').map(s => s.replace(/<[^>]+>/g, '').length));
-  const w = EM_COLS.map(([k]) => { const m = Math.max(...cells.map(c => len(c[k]))); return m ? Math.min(Math.max(m, 12), 34) / 2 : 7; });
-  const tot = w.reduce((a, b) => a + b, 0);
-  return w.map(x => x / tot * 100);
-}
+// 日付×枠 sheet (the Excel layout): one row per date, every column shown so the crew can write in.
+// Screen, print and Excel all use the EM_COLS widths (they add up to 100%), so long 餃子 names wrap the same way everywhere.
 function emSheet(days, rowH) {
-  const lines = days.map(emLines), pct = rowH ? emColWidths(days) : EM_COLS.map(c => c[3]);
+  const lines = days.map(emLines), pct = EM_COLS.map(c => c[3]);
   const cells = lines.map(c => Object.fromEntries(EM_COLS.map(([k]) => [k, c[k].map(emLineHtml).join('')])));
   return `<table class="ev evx"><colgroup><col style="width:calc(var(--fs,16px) * 3.8)"><col style="width:calc(var(--fs,16px) * 1.9)">${pct.map(p => `<col style="width:${p.toFixed(1)}%">`).join('')}</colgroup>
     <thead><tr><th>日付</th><th>曜日</th>${EM_COLS.map(c => `<th style="background:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>
@@ -1108,14 +1106,16 @@ const PAGE_H_MM = 210 - 14;
 function fitPage(page, minFs = 5) {
   const em = page.classList.contains('empage'), H = em ? EM_PAPER[emPaper].h : PAGE_H_MM;
   const trs = [...page.querySelectorAll('tr[data-h]')];
-  // Prefer equal-height weeks; if that doesn't fit, let busy weeks grow (min 12mm) so the text can stay larger
+  // Prefer equal-height weeks; if that doesn't fit, let busy weeks grow (min 12mm) so the text can stay larger.
+  // The 早朝 計画表 always keeps every date the same height (the font shrinks instead).
   for (let fs = em ? 24 : 10.5; fs >= minFs; fs -= 0.5) {
     page.style.setProperty('--fs', fs + 'px');
-    for (const even of [true, false]) {
-      trs.forEach(tr => tr.style.height = even ? tr.dataset.h + 'mm' : (em ? '6mm' : '12mm'));
+    for (const even of em ? [true] : [true, false]) {
+      trs.forEach(tr => tr.style.height = even ? tr.dataset.h + 'mm' : '12mm');
       if (page.scrollHeight / (96 / 25.4) <= H - 2) return true;
     }
   }
+  if (em) trs.forEach(tr => tr.style.height = tr.dataset.h + 'mm'); // 早朝: every date the same height, even if it runs over
   return false;
 }
 function fitPrint() {
@@ -1270,8 +1270,8 @@ function saveXlsx(sheets, filename) {
 
 function exportEmXlsx() {
   const f = $('from').value, t = $('to').value, days = emDays();
-  const txt = it => `${it.name} ${it.plan}${it.planUnit}${it.qty !== null && it.unit !== it.planUnit ? `（${it.qty}${it.unit}）` : ''}${it.note ? ` ※${it.note}` : ''}`;
-  const zero = (d, slot) => d.zero.filter(it => emSlotOf(it) === slot).map(it => `【中止】${it.name}`);
+  const txt = it => `${emName(it.name)} ${it.plan}${it.planUnit}${it.qty !== null && it.unit !== it.planUnit ? `（${it.qty}${it.unit}）` : ''}${it.note ? ` ※${it.note}` : ''}`;
+  const zero = (d, slot) => d.zero.filter(it => emSlotOf(it) === slot).map(it => `【中止】${emName(it.name)}`);
   const grid = [['日付', '曜日', ...EM_COLS.map(c => c[1])]];
   for (const d of days) {
     grid.push([toDate(d.key), WD[toDate(d.key).getDay()],
@@ -1335,22 +1335,26 @@ async function saveEmStyled(days, detail, filename) {
   // One rich-text run per piece so the 計画 is bold and 中止 lines are struck through, as on the printout
   const runs = (it, tag) => [
     ...(tag ? [{ text: tag + ' ', font: { size: FS - 2, color: { argb: 'FF555555' } } }] : []),
-    { text: it.name + ' ', font: { size: FS } },
+    { text: emName(it.name) + ' ', font: { size: FS } },
     { text: `${fmt(it.plan)}${it.planUnit}`, font: { size: FS + 2, bold: true } },
     ...(it.qty !== null && it.unit !== it.planUnit ? [{ text: ` (${fmt(it.qty)}${it.unit})`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : []),
     ...(it.note ? [{ text: ` ${it.note}`, font: { size: FS - 2, color: { argb: 'FF555555' } } }] : [])];
   const chgRun = c => ({ text: c.type === '変更' ? `【変更 ${c.before}→】` : `【${c.type}】`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } });
   const lineRuns = l => {
     if (l.block) return [{ text: '不可', font: { size: FS + 2, bold: true } }, ...(l.block.reason ? [{ text: `（${l.block.reason}）`, font: { size: FS } }] : [])];
-    if (l.cancel) return [chgRun({ type: 'キャンセル' }), { text: `${l.cancel.name} ${emPlanText(l.cancel)}`, font: { size: FS, strike: true, color: { argb: 'FF555555' } } }];
-    if (l.zero) return [{ text: `${l.it.name} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }];
+    if (l.cancel) return [chgRun({ type: 'キャンセル' }), { text: `${emName(l.cancel.name)} ${emPlanText(l.cancel)}`, font: { size: FS, strike: true, color: { argb: 'FF555555' } } }];
+    if (l.zero) return [{ text: `${emName(l.it.name)} 0`, font: { size: FS - 2, strike: true, color: { argb: 'FF777777' } } }];
     const pre = l.change ? [chgRun(l.change)] : [];
-    if (l.over) return [...pre, { text: `⚠超過 ${l.it.name} ${fmt(l.it.plan)}${l.it.planUnit}`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } }];
+    if (l.over) return [...pre, { text: `⚠超過 ${emName(l.it.name)} ${fmt(l.it.plan)}${l.it.planUnit}`, font: { size: FS, bold: true, color: { argb: 'FFBB0000' } } }];
     return [...pre, ...runs(l.it, l.tag)];
   };
   const joinLines = ls => ls.flatMap((l, j) => j ? [{ text: '\n', font: { size: FS } }, ...l] : l);
   // The plan as exported, remembered in this browser for the next comparison
   const data = [['meta', version, exportedAt, $('from').value, $('to').value, $('fileinfo').textContent]];
+  // Every date row gets the same height: enough wrapped lines for the busiest cell of the period (at least 2, room to write in)
+  const textW = s => [...s].reduce((w, c) => w + (/[\u0000-ÿ｡-ﾟ]/.test(c) ? 1 : 2), 0); // full-width counts double
+  const cellLines = (ls, width) => ls.reduce((n, l) => n + Math.max(1, Math.ceil(textW(l.map(r => r.text).join('')) * 1.4 / (width - 1))), 0);
+  let maxLines = 2;
 
   days.forEach((d, n) => {
     const dt = toDate(d.key), w = dt.getDay(), cols = emLines(d);
@@ -1359,9 +1363,11 @@ async function saveEmStyled(days, detail, filename) {
     row.getCell(1).value = `${dt.getMonth() + 1}/${dt.getDate()}`;
     row.getCell(2).value = WD[w];
     EM_COLS.forEach(([k], i) => {
-      if (cols[k].length) row.getCell(3 + i).value = { richText: joinLines(cols[k].map(lineRuns)) };
+      if (!cols[k].length) return;
+      const ls = cols[k].map(lineRuns);
+      row.getCell(3 + i).value = { richText: joinLines(ls) };
+      maxLines = Math.max(maxLines, cellLines(ls, widths[2 + i]));
     });
-    // No fixed row height: Excel auto-fits on open and again whenever someone types an addition into a cell
     const color = w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000';
     widths.forEach((_, j) => {
       const c = row.getCell(j + 1), i = j + 1;
@@ -1375,6 +1381,7 @@ async function saveEmStyled(days, detail, filename) {
       c.font = i <= 2 ? { bold: true, size: FS, color: { argb: color } } : { size: FS };
     });
   });
+  days.forEach((_, n) => { ws.getRow(4 + n).height = maxLines * 20 + 4; });
   const foot = ws.getRow(4 + days.length);
   foot.getCell(1).value = `変更があれば○で囲むか書き込んでください。1日「メイン1＋サブ1」または「メイン2・サブなし」。第${version}版　出力：${exportedAt}${emPrev ? `　【 】＝第${emPrev.version}版からの変更` : ''}`;
   foot.getCell(1).font = { size: 11 };
@@ -1397,7 +1404,8 @@ async function saveEmStyled(days, detail, filename) {
 
   const ds = book.addWorksheet('明細', { views: [{ state: 'frozen', ySplit: 1 }] });
   ds.columns = [7, 5, 12, 10, 34, 7, 8, 8, 6, 14].map(width => ({ width }));
-  detail.forEach(r => ds.addRow(r));
+  // ExcelJS writes Dates as UTC: pass the calendar day at UTC midnight, or JST dates land on the day before
+  detail.forEach(r => ds.addRow(r.map(v => v instanceof Date ? new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate())) : v)));
   ds.getRow(1).font = { bold: true };
   ds.getColumn(1).numFmt = 'm/d';
   ds.autoFilter = { from: { row: 1, column: 1 }, to: { row: detail.length, column: detail[0].length } };
