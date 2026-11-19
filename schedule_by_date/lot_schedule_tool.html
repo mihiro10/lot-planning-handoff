@@ -619,9 +619,12 @@ function render() {
 
   if (view === 'day') {
     html += `<div class="panel noprint"><div class="row">
+      <button class="ghost" id="day10">10日間（明日から）</button>
       <button id="dayPrint">印刷</button>
+      <button class="ghost" id="dayKama">製造計画表Excel（釜割り用）</button>
       <button class="ghost" id="dayCsv">CSVダウンロード</button></div>
-      <p class="note" style="margin:10px 0 0">印刷は6日ずつのカレンダー（A4横）。各日の下に追加・変更を書き込む欄があります。</p></div>`;
+      <p class="note" style="margin:10px 0 0">印刷は6日ずつのカレンダー（A4横）。各日の下に追加・変更を書き込む欄があります。<br>
+      製造計画表Excel：「第一昼間厨房製造計画表(原紙)」と同じ形のシートを1日1枚。右側にその日の品目が並ぶので、小釜①・小釜②＆中釜・大釜の欄にコピーして貼り付けてください（右側の一覧は印刷されません）。厨房分だけにするときは${esc(parsed.placeLabel)}で「昼間厨房①」に絞ってから出してください。</p></div>`;
     for (const d of days) {
       const list = items.filter(i => i.date === d.key);
       const wd = new Date(d.y, d.m - 1, d.d).getDay();
@@ -687,6 +690,8 @@ function render() {
     renderDeptPrint();
   } else {
     $('dayPrint').onclick = () => window.print();
+    $('day10').onclick = setTenDays;
+    $('dayKama').onclick = () => exportKamaXlsx(items, days);
     $('dayCsv').onclick = downloadCSV;
     renderPrint(items);
   }
@@ -1529,6 +1534,80 @@ async function saveMxStyled(pages, filename) {
       cell.font = { ...cell.font, name: MX_FONT };
     }));
   }
+  const blob = new Blob([await book.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---- 製造計画表 (釜割り): one sheet per day laid out like 第一昼間厨房製造計画表(原紙).xls ("Sheet1 (2)"), A–F.
+// Which 釜 an item goes in is not in the 在庫表, so the 釜 blocks stay empty and the day's items are listed in H–K
+// for the 厨房 to copy into C / E. H–K are outside the print area. Same fonts, so a pasted cell matches the sheet.
+const KAMA_FONT = 'HGS創英角ｺﾞｼｯｸUB', KAMA_TITLE_FONT = 'HGP創英角ｺﾞｼｯｸUB';
+const KAMA_BLOCKS = [['小釜①製造作業', 2], ['小釜②＆中釜製造作業', 8], ['大釜製造作業', 14], ['明日の準備事項及び確認事項', 20]]; // header row; 5 rows below
+// 「梅しそ大根タレ×1」 as the 厨房 writes it; other units (本・p…) as 「品目 3本」
+const kamaText = it => !it.planUnit || it.planUnit === '倍' ? `${it.name}×${fmt(it.plan)}` : `${it.name} ${fmt(it.plan)}${it.planUnit}`;
+
+function exportKamaXlsx(items, days) {
+  const filename = `製造計画表_${$('from').value}_${$('to').value}.xlsx`;
+  loadExcelJS().then(() => saveKamaXlsx(items, days, filename)).catch(err => {
+    console.error(err); alert('Excelを作れませんでした（ネットワークを確認してください）。');
+  });
+}
+
+async function saveKamaXlsx(items, days, filename) {
+  const thick = { style: 'medium', color: { argb: 'FF000000' } };
+  const font = (size = 14) => ({ name: KAMA_FONT, size });
+  const book = new ExcelJS.Workbook();
+  for (const d of days) {
+    const wd = new Date(d.y, d.m - 1, d.d).getDay(), list = items.filter(i => i.date === d.key && i.plan !== 0);
+    const ws = book.addWorksheet(`${d.m}-${d.d}(${WD[wd]})`, {
+      pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 1, horizontalCentered: true,
+        printArea: 'A1:F25', margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } }
+    });
+    // Column widths of the 原紙 (A–F); G spacer; H–K the day's list
+    ws.columns = [2.6, 2.6, 33.6, 2.6, 15.75, 14.6, 3, 40, 12, 18, 30].map(width => ({ width }));
+    for (let r = 1; r <= 25; r++) ws.getRow(r).height = 25;
+
+    ws.mergeCells('B1:F1');
+    Object.assign(ws.getCell('B1'), { value: `${d.y}/${d.m}/${d.d}(${WD[wd]})`, font: { name: KAMA_TITLE_FONT, size: 16 }, alignment: { horizontal: 'center', vertical: 'middle' } });
+    // Style every cell first, then merge without style: after a merge ExcelJS sends writes to the top-left cell,
+    // and a plain mergeCells copies that cell's style over the rest (F would lose its right border)
+    for (const [label, h] of KAMA_BLOCKS) {
+      for (let c = 2; c <= 6; c++) {
+        const cell = ws.getCell(h, c);
+        cell.border = { top: thick, bottom: thick, ...(c === 2 ? { left: thick } : {}), ...(c === 6 ? { right: thick } : {}) };
+        cell.font = font(); cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      }
+      ws.getCell(h, 2).value = label; // F of 小釜①/小釜②/大釜 = 担当者 name, left blank
+      for (let r = h + 1; r <= h + 5; r++) {
+        for (let c = 2; c <= 6; c++) {
+          const cell = ws.getCell(r, c);
+          cell.font = font(); cell.alignment = { vertical: 'middle', shrinkToFit: true };
+          cell.border = { ...(c === 2 ? { left: thick } : {}), ...(c === 6 ? { right: thick } : {}), ...(r === 25 ? { bottom: thick } : {}) };
+        }
+      }
+    }
+    for (const [, h] of KAMA_BLOCKS) {
+      ws.mergeCellsWithoutStyle(h, 2, h, h === 20 ? 6 : 5); // 明日の準備: header spans B–F (no 担当 cell)
+      for (let r = h + 1; r <= h + 5; r++) ws.mergeCellsWithoutStyle(r, 5, r, 6);
+    }
+
+    // The day's list (not printed). Plain cells, no borders, so copying one into C / E keeps the sheet's look.
+    Object.assign(ws.getCell('H1'), { value: list.length ? `この日の予定（${list.length}件）→ 左の欄にコピー` : 'この日の予定はありません', font: { name: KAMA_FONT, size: 12 }, alignment: { vertical: 'middle' } });
+    ws.getRow(2).getCell(8).value = '品目（計画）'; ws.getRow(2).getCell(9).value = '数量';
+    ws.getRow(2).getCell(10).value = parsed.placeLabel; ws.getRow(2).getCell(11).value = '備考';
+    for (let c = 8; c <= 11; c++) Object.assign(ws.getCell(2, c), { font: { size: 10, color: { argb: 'FF555555' } }, alignment: { vertical: 'middle' } });
+    list.forEach((it, n) => {
+      const row = ws.getRow(3 + n);
+      if (3 + n > 25) row.height = 25;
+      Object.assign(row.getCell(8), { value: kamaText(it), font: font(), alignment: { vertical: 'middle' } });
+      Object.assign(row.getCell(9), { value: it.qty === null ? '' : `${fmt(it.qty)}${it.unit}`, font: { size: 11 }, alignment: { vertical: 'middle' } });
+      Object.assign(row.getCell(10), { value: it.placeRaw, font: { size: 10 }, alignment: { vertical: 'middle', shrinkToFit: true } });
+      Object.assign(row.getCell(11), { value: it.note, font: { size: 10 }, alignment: { vertical: 'middle', wrapText: true } });
+    });
+  }
+  if (!days.length) book.addWorksheet('予定なし');
   const blob = new Blob([await book.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
