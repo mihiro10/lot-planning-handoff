@@ -108,15 +108,16 @@ td.place .bad{color:var(--zero)}
 .mxpage .foot{font-size:9pt;margin:3px 0 0}
 .gp th,.gp td{border:1px solid #000;padding:1px 3px;color:#000}
 .gp th{font-size:10pt;background:#eee;text-align:center;font-weight:bold}
+/* Shading is plain gray for black-and-white printers, and never stacks: a weekend on a tinted column is
+   still just the weekend gray (colour tints and stacked shades come out as dark dot patterns in B&W) */
 .gp th.we{background:#d9d9d9}
 .gp th.sun{color:#b00}.gp th.sat{color:#03a}
 .gp td{height:11mm;font-size:13pt;text-align:center;vertical-align:middle}
 .gp td.nm{text-align:left;font-size:12pt;line-height:1.2;font-weight:bold}
 .gp td.u{font-size:9pt}
-.gp td.we{background:#f3f3f3}
-.gp td.alt,.gp th.alt{background:#e3edf8}
-.gp td.alt.we{background:#d3dfec}
-.gp th.alt.we{background:#c8d6e6}
+.gp td.alt{background:#f2f2f2}.gp th.alt{background:#e6e6e6}
+.gp td.we,.gp td.alt.we{background:#e6e6e6}
+.gp th.alt.we{background:#d9d9d9}
 .gp td b{font-size:13pt}
 .gp td.z b{text-decoration:line-through;color:#777}
 .gp td .nt{display:block;font-size:7pt;color:#444;line-height:1.1}
@@ -1481,13 +1482,14 @@ async function saveMxStyled(pages, filename) {
     Object.assign(ws.getCell(1, mid + 1), { value: pg.sub, font: { size: 9 }, alignment: { horizontal: 'right', vertical: 'middle', wrapText: true } });
     ws.getRow(1).height = 30;
 
-    // Row 2: header. Weekend columns darker, every other date tinted, 日 red / 土 blue
+    // Row 2: header. Weekend columns darker, every other date a little darker, 日 red / 土 blue.
+    // Grays only, never stacked, so black-and-white prints stay light (same shades as the .gp print CSS)
     const head = ws.getRow(2);
     head.values = ['品目名', '単位', ...days.map(d => `${d.m}/${d.d}\n${WD[wdOf(d)]}`)];
     head.height = 30;
     for (let c = 1; c <= last; c++) {
       const cell = head.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
-      cell.fill = fill(alt && we ? '#C8D6E6' : alt ? '#E3EDF8' : we ? '#D9D9D9' : '#EEEEEE');
+      cell.fill = fill(we ? '#D9D9D9' : alt ? '#E6E6E6' : '#EEEEEE');
       cell.font = { bold: true, size: 10, color: { argb: w === 0 ? 'FFBB0000' : w === 6 ? 'FF0033AA' : 'FF000000' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
       cell.border = border;
@@ -1513,7 +1515,7 @@ async function saveMxStyled(pages, filename) {
       });
       for (let c = 1; c <= last; c++) {
         const cell = row.getCell(c), n = c - 3, d = days[n], w = d ? wdOf(d) : -1, we = w === 0 || w === 6, alt = d && n % 2;
-        if (d && (we || alt)) cell.fill = fill(alt && we ? '#D3DFEC' : alt ? '#E3EDF8' : '#F3F3F3');
+        if (d && (we || alt)) cell.fill = fill(we ? '#E6E6E6' : '#F2F2F2');
         if (c > 1) cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         cell.border = border;
       }
